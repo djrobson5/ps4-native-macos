@@ -105,6 +105,9 @@ struct PipelineSelection {
 /// BB_QUADS_AS_TRIANGLES=1 (off by default: not exercised by the game yet; its tessellated
 /// draws are rect lists).
 bool QuadsAsTriangles();
+/// bbport: triangle fans and polygons drawn as indexed triangle lists (FansAsTriangles), for a
+/// GPU without a fan topology (Metal). BB_FANS_AS_TRIANGLES=1 (off by default).
+bool FansAsTriangles();
 /// bbport: rect lists whose vertex shader passes 32-bit float attributes through drawn as triangle
 /// lists, two triangles per rect, the 4th corner computed on the CPU (Rasterizer::ExpandRects)
 /// instead of by a tessellation stage (a compute pass per draw on MoltenVK).

@@ -30,6 +30,7 @@
 #include "video_core/amdgpu/pm4_cmds.h"
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/buffer_cache/buffer_cache.h"
+#include "video_core/renderer_vulkan/fan_triangles.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_backend_device.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -1699,6 +1700,85 @@ bool Rasterizer::FilterDrawPasses() const {
 
 static std::atomic<u64> empty_draws_skipped{0};
 
+namespace {
+// bbport (FansAsTriangles): a guest triangle fan or polygon.
+bool IsFanPrimitive(AmdGpu::PrimitiveType type) {
+    return type == AmdGpu::PrimitiveType::TriangleFan || type == AmdGpu::PrimitiveType::Polygon;
+}
+
+// BB_FRAME_STATS, every 5 s: draws by guest primitive type, for the types Metal draws no
+// topology of its own for (fans, adjacency, quad strips, line loops). Per type: all draws, and
+// how many of them are indexed, indirect and have primitive restart enabled. Fans converted to
+// triangles (FansAsTriangles) are counted apart. Line format:
+//   Emulated topologies: <type> <n>/s (indexed <n>, indirect <n>, restart <n>), ...;
+//   fans drawn as triangles <n>/s
+// (the types with no draws are left out; "none" when there are none).
+void NoteTopology(AmdGpu::PrimitiveType type, bool indexed, bool indirect, bool restart,
+                  bool fan_converted) {
+    using Type = AmdGpu::PrimitiveType;
+    struct Count {
+        const char* name;
+        Type type;
+        std::atomic<u64> draws{0}, indexed{0}, indirect{0}, restart{0};
+    };
+    static std::array<Count, 8> counts{{
+        {"TriangleFan", Type::TriangleFan},
+        {"Polygon", Type::Polygon},
+        {"AdjLineList", Type::AdjLineList},
+        {"AdjLineStrip", Type::AdjLineStrip},
+        {"AdjTriangleList", Type::AdjTriangleList},
+        {"AdjTriangleStrip", Type::AdjTriangleStrip},
+        {"QuadStrip", Type::QuadStrip},
+        {"LineLoop", Type::LineLoop},
+    }};
+    static std::atomic<u64> fans_converted{0};
+    static std::atomic<s64> window{0};
+    for (auto& count : counts) {
+        if (count.type != type) {
+            continue;
+        }
+        count.draws.fetch_add(1, std::memory_order_relaxed);
+        count.indexed.fetch_add(indexed, std::memory_order_relaxed);
+        count.indirect.fetch_add(indirect, std::memory_order_relaxed);
+        count.restart.fetch_add(restart, std::memory_order_relaxed);
+        break;
+    }
+    fans_converted.fetch_add(fan_converted, std::memory_order_relaxed);
+    const s64 now = std::chrono::duration_cast<std::chrono::seconds>(
+                        std::chrono::steady_clock::now().time_since_epoch()).count();
+    s64 last = window.load(std::memory_order_relaxed);
+    if (last == 0) {
+        window.compare_exchange_strong(last, now); // the first window starts at the first draw
+        return;
+    }
+    if (now - last < 5 || !window.compare_exchange_strong(last, now)) {
+        return;
+    }
+    std::string line = "Emulated topologies:";
+    bool any = false;
+    for (auto& count : counts) {
+        const u64 draws = count.draws.exchange(0);
+        const u64 indexed_draws = count.indexed.exchange(0);
+        const u64 indirect_draws = count.indirect.exchange(0);
+        const u64 restart_draws = count.restart.exchange(0);
+        if (draws == 0) {
+            continue;
+        }
+        char text[160];
+        std::snprintf(text, sizeof(text), "%s %s %.1f/s (indexed %.1f, indirect %.1f, restart %.1f)",
+                      any ? "," : "", count.name, draws / 5.0, indexed_draws / 5.0,
+                      indirect_draws / 5.0, restart_draws / 5.0);
+        line += text;
+        any = true;
+    }
+    if (!any) {
+        line += " none";
+    }
+    std::printf("%s; fans drawn as triangles %.1f/s\n", line.c_str(),
+                fans_converted.exchange(0) / 5.0);
+}
+} // namespace
+
 bool Rasterizer::SkipsEmptyDraws() {
     static const bool keep = [] {
         const char* env = std::getenv("BB_KEEP_EMPTY_DRAWS");
@@ -1876,9 +1956,16 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     const bool rect_triangles = regs.primitive_type == AmdGpu::PrimitiveType::RectList &&
                                 pipeline->GetGraphicsKey().prim_type ==
                                     AmdGpu::PrimitiveType::TriangleList;
+    // bbport: a triangle fan or polygon drawn as triangles (FansAsTriangles): indexed by
+    // BindFanTriangles.
+    const bool fan_triangles = IsFanPrimitive(regs.primitive_type) &&
+                               pipeline->GetGraphicsKey().prim_type ==
+                                   AmdGpu::PrimitiveType::TriangleList;
     // BB_FRAME_STATS: quad/rect lists by path, every 5 s.
     static const bool prim_stats = std::getenv("BB_FRAME_STATS") != nullptr;
     if (prim_stats) {
+        NoteTopology(regs.primitive_type, is_indexed, false, regs.enable_primitive_restart & 1,
+                     fan_triangles);
         static std::atomic<u64> converted{0}, quad_tess{0}, rect_tess{0};
         static std::atomic<s64> window{0};
         if (quad_triangles || rect_triangles) {
@@ -1918,7 +2005,8 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     const PreparedDraw* draw_prepared = bind_prepared;
     // bbport: vertex and index buffers are resolved while the helper binds textures (their
     // commands are recorded after BeginRendering, as before).
-    const bool guest_indexed = is_indexed && !quad_triangles && !rect_triangles && !fixed_quad;
+    const bool guest_indexed =
+        is_indexed && !quad_triangles && !rect_triangles && !fan_triangles && !fixed_quad;
     draw_inputs = {pipeline, draw_prepared, index_offset, guest_indexed, !fixed_quad, false};
     const bool bound = BindResources(pipeline);
     bind_prepared = nullptr; // indirect draws and dispatches bind without prepared sharps
@@ -1945,8 +2033,14 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
         }
     }
     EmitVertexBuffers();
+    u32 fan_indices = 0;
     if (quad_triangles) {
         if (!BindQuadTriangles(is_indexed, index_offset)) {
+            return;
+        }
+    } else if (fan_triangles) {
+        if (!BindFanTriangles(is_indexed, index_offset, fan_indices)) {
+            ResetBindings(false);
             return;
         }
     } else if (is_indexed && !fixed_quad) {
@@ -2081,8 +2175,10 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     const u32 num_indices = fixed_quad ? fixed_quad_vertices
                             : rect_triangles   ? rect_vertices
                             : quad_triangles ? regs.num_indices / 4 * 6
+                            : fan_triangles  ? fan_indices
                                              : regs.num_indices;
-    const bool draw_indexed = (is_indexed || quad_triangles) && !rect_triangles && !fixed_quad;
+    const bool draw_indexed =
+        (is_indexed || quad_triangles || fan_triangles) && !rect_triangles && !fixed_quad;
     const u32 num_instances = fixed_quad ? regs.num_indices : regs.num_instances.NumInstances();
     const u32 first_vertex = rect_triangles || fixed_quad ? 0 : vertex_offset;
     const u32 first_instance = instance_offset;
@@ -2167,6 +2263,12 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
     const u32 stride = indirect.stride;
     const u32 max_count = indirect.max_count;
 
+    static const bool topology_stats = std::getenv("BB_FRAME_STATS") != nullptr;
+    if (topology_stats) {
+        const auto& regs = Regs();
+        NoteTopology(regs.primitive_type, is_indexed, true, regs.enable_primitive_restart & 1,
+                     false);
+    }
     // Indirect arguments may be GPU-written: leave these draws on camera fallback.
     motion_draw = false;
     motion_geometry = 0;
@@ -3413,6 +3515,72 @@ bool Rasterizer::BindQuadTriangles(bool is_indexed, u32 index_offset) {
     index_bind = {stream.Native(), offset,
                   is_index16 ? VideoCore::Backend::IndexType::UInt16
                              : VideoCore::Backend::IndexType::UInt32};
+    EmitIndexBuffer();
+    return true;
+}
+
+// bbport (FansAsTriangles): a triangle fan or polygon as triangles, (k+1 k+2 0) for each k (the
+// order keeps Vulkan's provoking vertex), in an index buffer of the stream buffer: the guest's
+// indices rearranged and split at the restart index, or 1 2 0 2 3 0 ... for a non-indexed draw
+// (base vertex: the draw's first vertex). `index_count` is the number of indices to draw. False:
+// the draw is skipped (fewer than 3 vertices, or indices that cannot be read). With the last
+// vertex as the provoking one, (0 k+1 k+2).
+bool Rasterizer::BindFanTriangles(bool is_indexed, u32 index_offset, u32& index_count) {
+    const auto& regs = Regs();
+    const u32 vertices = regs.num_indices;
+    // The guest's provoking vertex mode (the pipeline key's), so flat attributes come from the
+    // same vertex as on the GPU's own fans.
+    const bool provoking_last =
+        regs.polygon_control.provoking_vtx_last != AmdGpu::ProvokingVtxLast::First;
+    auto& stream = buffer_cache.GetStreamBuffer();
+    if (!is_indexed) {
+        const u64 count = FanTriangles::SequentialCount(vertices);
+        if (count == 0 || count > std::numeric_limits<u32>::max()) {
+            return false;
+        }
+        const auto [data, offset] = stream.Map(count * sizeof(u32), sizeof(u32));
+        FanTriangles::BuildSequential(vertices, reinterpret_cast<u32*>(data), provoking_last);
+        stream.Commit();
+        index_count = u32(count);
+        index_bind = {stream.Native(), offset, VideoCore::Backend::IndexType::UInt32};
+        EmitIndexBuffer();
+        return true;
+    }
+    const bool is_index16 = regs.index_buffer_type.index_type == AmdGpu::IndexType::Index16;
+    const u32 index_size = is_index16 ? 2 : 4;
+    const VAddr address = regs.index_base_address.Address<VAddr>() + u64(index_offset) * index_size;
+    const u64 bytes = u64(vertices) * index_size;
+    if (vertices < 3 || !memory->IsValidGpuMapping(address, 0) ||
+        memory->ClampRangeSize(address, bytes) != bytes) {
+        return false;
+    }
+    static std::atomic<bool> warned{false};
+    if (buffer_cache.IsRegionGpuModified(address, bytes) && !warned.exchange(true)) {
+        std::printf("Fans as triangles: an index buffer the GPU writes, read by the CPU (%#llx)\n",
+                    static_cast<unsigned long long>(address));
+    }
+    const bool restart = (regs.enable_primitive_restart & 1) != 0;
+    const auto build = [&](const auto* in) {
+        using Index = std::remove_const_t<std::remove_pointer_t<decltype(in)>>;
+        const u64 count = FanTriangles::IndexedCount(in, vertices, restart);
+        if (count == 0 || count > std::numeric_limits<u32>::max()) {
+            return false;
+        }
+        const auto [data, offset] = stream.Map(count * sizeof(Index), sizeof(Index));
+        FanTriangles::BuildIndexed(in, vertices, restart, reinterpret_cast<Index*>(data),
+                                   provoking_last);
+        stream.Commit();
+        index_count = u32(count);
+        index_bind = {stream.Native(), offset,
+                      is_index16 ? VideoCore::Backend::IndexType::UInt16
+                                 : VideoCore::Backend::IndexType::UInt32};
+        return true;
+    };
+    const bool built = is_index16 ? build(reinterpret_cast<const u16*>(address))
+                                  : build(reinterpret_cast<const u32*>(address));
+    if (!built) {
+        return false;
+    }
     EmitIndexBuffer();
     return true;
 }
@@ -5337,7 +5505,12 @@ void Rasterizer::UpdatePrimitiveState(const GraphicsPipeline* pipeline,
                                       const bool is_indexed) const {
     const auto& regs = Regs();
     auto& dynamic_state = recorder.GetDrawState();
-    const auto primitive = pipeline->GetGraphicsKey().fixed_quad_outer
+    // bbport (FansAsTriangles): a fan drawn as triangles is a triangle list with no restart
+    // indices left (BindFanTriangles split the draw at them).
+    const bool fan_triangles = IsFanPrimitive(regs.primitive_type) &&
+                               pipeline->GetGraphicsKey().prim_type ==
+                                   AmdGpu::PrimitiveType::TriangleList;
+    const auto primitive = pipeline->GetGraphicsKey().fixed_quad_outer || fan_triangles
                                ? AmdGpu::PrimitiveType::TriangleList
                                : regs.primitive_type;
 
@@ -5355,7 +5528,7 @@ void Rasterizer::UpdatePrimitiveState(const GraphicsPipeline* pipeline,
     };
 
     const auto prim_restart =
-        (regs.enable_primitive_restart & 1) != 0 &&
+        !fan_triangles && (regs.enable_primitive_restart & 1) != 0 &&
         (device.GetCapabilities().list_restart || !is_list_topology(primitive)) &&
         (device.GetCapabilities().patch_list_restart || !is_patch_list_topology(primitive));
     ASSERT_MSG(!is_indexed || !prim_restart || regs.primitive_restart_index == 0xFFFF ||

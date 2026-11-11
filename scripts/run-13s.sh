@@ -20,7 +20,14 @@ data=$(cd "$data" && pwd)
 # as run.sh's BB_METAL_FRAME=0).
 export BB_ARCH=arm64 BB_GUEST_IN_PLACE=0
 case ${S13_RENDERER:-metal} in
-metal) export BB_METAL_FRAME=1 BB_METAL_NATIVE_BOOT=1 BB_GFX_BACKEND=metal ;;
+metal)
+    export BB_METAL_FRAME=1 BB_METAL_NATIVE_BOOT=1 BB_GFX_BACKEND=metal
+    # Metal has no quad list or triangle fan topology: draw both as indexed triangle lists (both
+    # are off by default, so Bloodborne is unchanged). Without them the Metal frame skips those
+    # draws.
+    export BB_QUADS_AS_TRIANGLES=${BB_QUADS_AS_TRIANGLES:-1}
+    export BB_FANS_AS_TRIANGLES=${BB_FANS_AS_TRIANGLES:-1}
+    ;;
 moltenvk)
     export BB_METAL_FRAME=0 BB_METAL_NATIVE_BOOT=0 BB_GFX_BACKEND=vulkan
     export VK_DRIVER_FILES=${VK_DRIVER_FILES:-$PWD/deps/macos-arm64/share/vulkan/icd.d/MoltenVK_icd.json}

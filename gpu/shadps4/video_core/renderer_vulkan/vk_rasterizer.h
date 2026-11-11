@@ -451,6 +451,7 @@ private:
     void ResolveIndexBuffer(u32 index_offset);
     void EmitIndexBuffer();
     bool BindQuadTriangles(bool is_indexed, u32 index_offset);
+    bool BindFanTriangles(bool is_indexed, u32 index_offset, u32& index_count);
 
     void ResetBindings(bool is_compute);
 

@@ -770,6 +770,15 @@ bool QuadsAsTriangles() {
     return enabled;
 }
 
+bool FansAsTriangles() {
+    static const bool enabled = [] {
+        // Off by default: Bloodborne draws no fans through this path; Metal has no fan topology.
+        const char* env = std::getenv("BB_FANS_AS_TRIANGLES");
+        return env && env[0] == '1';
+    }();
+    return enabled;
+}
+
 bool RectsAsTriangles() {
     static const bool enabled = [] {
         const char* env = std::getenv("BB_RECTS_AS_TRIANGLES");
@@ -862,6 +871,16 @@ bool PipelineCache::RefreshGraphicsKey(PipelineSelection& sel) {
     // indirect draws or with primitive restart.
     if (key.prim_type == AmdGpu::PrimitiveType::QuadList && QuadsAsTriangles() && !sel.indirect &&
         !(regs.enable_primitive_restart & 1)) {
+        key.prim_type = AmdGpu::PrimitiveType::TriangleList;
+    }
+    // bbport: a triangle fan or polygon becomes a triangle list the draw indexes
+    // (FansAsTriangles): not for indirect draws (their vertex count is on the GPU), nor with
+    // geometry or tessellation stages (they read the guest topology). Primitive restart is split
+    // at draw time.
+    if ((key.prim_type == AmdGpu::PrimitiveType::TriangleFan ||
+         key.prim_type == AmdGpu::PrimitiveType::Polygon) &&
+        FansAsTriangles() && !sel.indirect && !regs.stage_enable.hs_en &&
+        !regs.stage_enable.gs_en) {
         key.prim_type = AmdGpu::PrimitiveType::TriangleList;
     }
     key.polygon_mode = regs.polygon_control.PolyMode();
