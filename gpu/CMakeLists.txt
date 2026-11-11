@@ -277,7 +277,10 @@ target_sources(bbgpu PRIVATE ${BB_TEXT_DIR}/bbport_text_data.inc)
 add_custom_command(OUTPUT ${BB_TEXT_DIR}/bbport_trophy_data.inc
     COMMAND ${CMAKE_COMMAND} -E make_directory ${BB_TEXT_DIR}
     COMMAND Python3::Interpreter ${CMAKE_CURRENT_SOURCE_DIR}/shim/gen_trophy_catalog.py ${BB_TEXT_DIR}/bbport_trophy_data.inc
-    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shim/gen_trophy_catalog.py ${CMAKE_CURRENT_SOURCE_DIR}/shim/trophy_catalog.json VERBATIM)
+            CUSA03173=${CMAKE_CURRENT_SOURCE_DIR}/shim/trophy_catalog.json
+            CUSA19610=${CMAKE_CURRENT_SOURCE_DIR}/shim/trophy_catalog_13s.json
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shim/gen_trophy_catalog.py ${CMAKE_CURRENT_SOURCE_DIR}/shim/trophy_catalog.json
+            ${CMAKE_CURRENT_SOURCE_DIR}/shim/trophy_catalog_13s.json VERBATIM)
 target_sources(bbgpu PRIVATE ${BB_TEXT_DIR}/bbport_trophy_data.inc)
 target_include_directories(bbgpu PRIVATE ${BB_TEXT_DIR})
 target_include_directories(bbgpu PRIVATE . fsr4_metal shim layer games cp shadps4 ${SHADER_INCLUDE} third_party/gcn/include third_party/half/include ../src ../bbcpu/src)
@@ -488,6 +491,16 @@ add_executable(trophy-queue-test EXCLUDE_FROM_ALL ../tests/test_trophy_queue.cpp
 target_include_directories(trophy-queue-test PRIVATE shim)
 target_compile_options(trophy-queue-test PRIVATE -UNDEBUG)
 
+add_executable(trophy-chime-test EXCLUDE_FROM_ALL ../tests/test_trophy_chime.cpp)
+target_include_directories(trophy-chime-test PRIVATE shim)
+target_compile_options(trophy-chime-test PRIVATE -UNDEBUG)
+
+# The trophy icons: a folder lookup, SDL's PNG loader and a small cache; no GPU.
+add_executable(trophy-icons-test EXCLUDE_FROM_ALL ../tests/test_trophy_icons.cpp)
+target_include_directories(trophy-icons-test PRIVATE shim)
+target_compile_options(trophy-icons-test PRIVATE -UNDEBUG)
+target_link_libraries(trophy-icons-test PRIVATE PkgConfig::SDL3)
+
 add_executable(upscaler-support-test EXCLUDE_FROM_ALL ../tests/test_upscaler_support.cpp
     shim/bbport_settings.cpp)
 target_include_directories(upscaler-support-test PRIVATE shim)
@@ -504,7 +517,7 @@ target_compile_options(upscaler-support-test PRIVATE -UNDEBUG)
 if (BUILD_TESTING)
     set(BBGPU_TESTS image-upload-hash-test slot-vector-test handle-table-test avplayer-queue-test
         avplayer-clock-test fixed-quad-tessellation-test fan-triangles-test image-sync-ledger-test motion-history-test
-        ui-composition-test cp-decoder-test settings-test trophy-queue-test upscaler-support-test)
+        ui-composition-test cp-decoder-test settings-test trophy-queue-test trophy-chime-test trophy-icons-test upscaler-support-test)
     foreach(test IN LISTS BBGPU_TESTS)
         add_test(NAME ${test} COMMAND ${test})
     endforeach()

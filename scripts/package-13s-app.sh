@@ -14,6 +14,15 @@
 #   --icon PNG    the app icon's picture, put on a dark square (e.g. the save data's icon0.png);
 #                 none: the app has no icon. Game pictures stay out of git: give one here.
 #   --no-game     leave the game's folder alone (only the app)
+#   --icon-cache DIR   where the trophy icons are kept between runs (default: build/trophy-icons,
+#                 which git ignores)
+#
+# The trophy icons: every icon_url of gpu/shim/trophy_catalog_13s.json (Sony's public image CDN) is
+# downloaded to Contents/Resources/achievements/<trophy number>.png, once (the cache is looked at
+# first). Wayfarer shows them beside the trophies. A download that fails is a warning: that trophy
+# has no picture and Wayfarer draws a grade badge instead. The pictures stay out of git. Beside them,
+# achievements.txt is the trophy list with nothing earned, so Wayfarer lists the trophies before the
+# game's first run writes its own ledger.
 #
 # The payload comes from `cmake --install` (CMakeLists.txt: the libraries in Frameworks/ with only
 # @-relative search paths, MoltenVK and its ICD file); Bloodborne's launcher parts (bash, Python,
@@ -25,6 +34,7 @@ repo=$PWD
 dest=$HOME/Games/'13 Sentinels Aegis Rim'
 game_src=$(cd .. && pwd)/dump/CUSA19610/uroot
 icon=
+icon_cache=
 copy_game=1
 while (($#)); do
     case $1 in
@@ -32,6 +42,7 @@ while (($#)); do
     --game) game_src=$2; shift 2 ;;
     --icon) icon=$2; shift 2 ;;
     --no-game) copy_game=0; shift ;;
+    --icon-cache) icon_cache=$2; shift 2 ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
     esac
 done
@@ -80,6 +91,61 @@ if [[ -n $icon ]]; then
     iconutil -c icns "$set" -o "$app/Contents/Resources/AppIcon.icns"
     icon_key='    <key>CFBundleIconFile</key><string>AppIcon</string>'
 fi
+
+# The trophy icons (before the signing: the bundle's seal covers them).
+catalog=gpu/shim/trophy_catalog_13s.json
+[[ -n $icon_cache ]] || icon_cache=$repo/build/trophy-icons
+mkdir -p "$icon_cache" "$app/Contents/Resources/achievements"
+icons_total=0 icons_fetched=0 icons_cached=0 icons_failed=0
+while read -r number url; do
+    icons_total=$((icons_total + 1))
+    if [[ $url != https://image.api.playstation.com/* ]]; then
+        echo "Warning: trophy $number: not Sony's image CDN, skipped: $url" >&2
+        icons_failed=$((icons_failed + 1))
+        continue
+    fi
+    key=$(printf %s "$url" | shasum -a 256 | cut -c1-16)
+    cached=$icon_cache/$number-$key.png
+    if [[ ! -s $cached ]]; then
+        # A generic User-Agent; a partial download is never cached (a temporary name, then mv).
+        if curl -fsSL --max-time 30 --retry 2 -A 'Mozilla/5.0 (Macintosh)' -o "$cached.part" "$url" &&
+           [[ $(head -c 4 "$cached.part" | od -An -tx1 | tr -d ' \n') == 89504e47 ]]; then
+            mv "$cached.part" "$cached"
+            icons_fetched=$((icons_fetched + 1))
+        else
+            rm -f "$cached.part"
+            echo "Warning: trophy $number: icon not downloaded ($url)" >&2
+            icons_failed=$((icons_failed + 1))
+            continue
+        fi
+    else
+        icons_cached=$((icons_cached + 1))
+    fi
+    cp "$cached" "$app/Contents/Resources/achievements/$number.png"
+done < <(python3 -I -c '
+import json, sys
+for trophy in json.load(open(sys.argv[1], encoding="utf-8"))["trophies"]:
+    if trophy.get("icon_url"):
+        print(trophy["id"], trophy["icon_url"])' "$catalog")
+echo "Trophy icons: $((icons_fetched + icons_cached)) of $icons_total in the app ($icons_fetched downloaded, $icons_cached from the cache, $icons_failed failed)"
+
+# The trophy list, nothing earned, in the ledger's format (src/runtime_trophies.c): Wayfarer shows it
+# from the moment the app is installed, until the game's own user/achievements.txt exists.
+python3 -I -c '
+import json, sys
+trophies = json.load(open(sys.argv[1], encoding="utf-8"))["trophies"]
+assert [t["id"] for t in trophies] == list(range(len(trophies)))
+lines = ["; The trophy list as installed, nothing earned (scripts/package-13s-app.sh).", "[unlocked]", "[grades]"]
+lines += ["%d = %s" % (t["id"], t["grade"]) for t in trophies]
+lines.append("[list]")
+for t in trophies:
+    en = t["translations"]["en"]
+    name, description = en["name"], en.get("description", "")
+    for text in (name, description):
+        assert "|" not in text and "\n" not in text, t["id"]
+    lines.append("%d = %s | %s" % (t["id"], name, description))
+open(sys.argv[2], "w", encoding="utf-8").write("\n".join(lines) + "\n")
+print(f"Trophy list: {len(trophies)} trophies in the app")' "$catalog" "$app/Contents/Resources/achievements/achievements.txt"
 
 minos=$(otool -l "$payload/Contents/MacOS/bb-probe" | awk '/LC_BUILD_VERSION/{f=1} f&&/minos/{print $2; exit}')
 commit=$(git -C "$repo" rev-parse --short HEAD)

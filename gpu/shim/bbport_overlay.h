@@ -32,6 +32,8 @@ void ApplyWindowSettings(SDL_Window* window);
 
 /// Guest thread: a newly persisted unlock, after the edited-save and duplicate checks.
 void TrophyUnlocked(const char* title, int id);
+/// Any thread: a trophy's English catalog text (static strings), false when the title or id is not in a catalog.
+bool TrophyCatalogText(const char* title, int id, const char** name, const char** description, const char** grade);
 /// Any thread: the online module's status line under the game's HUD; null or empty clears it.
 void SetBanner(const char* message);
 

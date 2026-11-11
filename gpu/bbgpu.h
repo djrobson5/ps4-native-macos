@@ -16,6 +16,11 @@ typedef struct {
 } BbGpuConfig;
 /* Queue a newly persisted trophy for the in-game overlay. Safe from guest threads. */
 void bbgpu_trophy_notification(const char *title, int id);
+/* The public catalog text of a trophy (English; name, description and grade are static strings that
+ * live on): 1, or 0 when the title has no catalog or the id is not in it. Ids of a catalog run
+ * 0..n-1, so n is the first id that returns 0. Pure lookup; safe from any thread. */
+int bbgpu_trophy_catalog_text(const char *title, int id, const char **name, const char **description,
+                              const char **grade);
 /* Online/co-op status line. NULL clears it; safe to call from a network worker. */
 void bbgpu_overlay_banner(const char *message);
 /* Registers kernel event queues (needed with or without graphics). */

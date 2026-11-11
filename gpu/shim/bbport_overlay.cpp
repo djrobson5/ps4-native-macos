@@ -15,6 +15,7 @@
 #include <ctime>
 #include <filesystem>
 #include <mutex>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -30,7 +31,10 @@
 #endif
 #include "bbport_settings.h"
 #include "bbport_text.h"
+#include "bbport_trophy_chime.h"
+#include "bbport_trophy_icons.h"
 #include "bbport_trophy_queue.h"
+#include "bbport_trophy_style.h"
 #ifdef BB_METAL_BACKEND
 #include "bbport_overlay_metal.h"
 #include "video_core/renderer_metal/mtl_vk_layer.h"
@@ -102,6 +106,7 @@ namespace BbOverlay {
 namespace {
 
 struct TrophyText {
+    const char* title; ///< the game's TITLE_ID: ids repeat across games
     int id;
     const char* language;
     const char* name;
@@ -111,23 +116,142 @@ struct TrophyText {
 };
 #include "bbport_trophy_data.inc"
 
+// The games with a catalog: the notices run while the game is the running one, and
+// BB_TROPHY_OVERLAY_PREVIEW=1 shows these ids (the platinum among them) without recording anything.
+// The ids a title shows are the ones its catalog has (0..n-1).
+constexpr int kBloodbornePreview[] = {21, 7, 1, 0, 35};
+constexpr int kThirteenSentinelsPreview[] = {1, 40, 45, 49, 0};
+struct TrophyTitle {
+    const char* title;
+    bool (*running)();
+    std::span<const int> preview;
+    BbTrophyStyle::Style style; ///< the notice's corner and whether it chimes (bbport_trophy_style.h)
+};
+constexpr TrophyTitle kTrophyTitles[] = {
+    {"CUSA03173", Game::IsBloodborne109, kBloodbornePreview, BbTrophyStyle::For("CUSA03173")},
+    {"CUSA19610", Game::IsThirteenSentinels, kThirteenSentinelsPreview, BbTrophyStyle::For("CUSA19610")},
+};
+
+const TrophyTitle* TrophyTitleFor(const char* title) {
+    for (const TrophyTitle& game : kTrophyTitles)
+        if (title && std::strcmp(title, game.title) == 0) return &game;
+    return nullptr;
+}
+
 BbTrophyQueue::Queue trophy_queue;
 float fps_top_right_bottom = 0.0f; ///< present thread: the FPS counter's bottom edge, when top right
+float fps_bottom_right_top = 0.0f; ///< present thread: the FPS counter's top edge, when bottom right
 
-const TrophyText* TrophyTextFor(int id, const char* language) {
+// The trophy chimes. Synthesizing them (tens of milliseconds) and opening the audio device happen
+// once, on a worker thread, the first time a notice that chimes is queued; the present thread only
+// hands samples to an SDL audio stream (SDL mixes it with the game's own stream on the default
+// device) and never waits.
+namespace Chime {
+enum State : int { Preparing, Ready, Failed };
+std::atomic<int> state{Preparing};
+std::once_flag prepare_once;
+std::vector<float> trophy, platinum;
+SDL_AudioStream* stream = nullptr; ///< lives until the process ends
+
+/// BB_TROPHY_SOUND=0 silences the chimes only (BB_TROPHY_OVERLAY=0 never gets here).
+bool Enabled() {
+    static const bool on = [] {
+        const char* env = std::getenv("BB_TROPHY_SOUND");
+        return !env || std::strcmp(env, "0") != 0;
+    }();
+    return on;
+}
+
+void Open() {
+    trophy = BbTrophyChime::Synthesize(BbTrophyChime::Kind::Trophy);
+    platinum = BbTrophyChime::Synthesize(BbTrophyChime::Kind::Platinum);
+    const char* mode = std::getenv("BB_AUDIO");
+    if (mode && std::strcmp(mode, "none") == 0) {
+        std::fprintf(stderr, "trophy chime: audio is off (BB_AUDIO=none), no chimes\n");
+        state = Failed;
+        return;
+    }
+    if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) {
+        std::fprintf(stderr, "trophy chime: SDL audio did not start (%s), no chimes\n", SDL_GetError());
+        state = Failed;
+        return;
+    }
+    const SDL_AudioSpec spec{SDL_AUDIO_F32, 1, BbTrophyChime::Rate};
+    stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
+    if (!stream || !SDL_ResumeAudioStreamDevice(stream)) {
+        std::fprintf(stderr, "trophy chime: no audio output (%s), no chimes\n", SDL_GetError());
+        if (stream) SDL_DestroyAudioStream(stream);
+        stream = nullptr;
+        state = Failed;
+        return;
+    }
+    state = Ready;
+}
+
+/// Any thread: starts preparing the chimes, once.
+void Prepare() {
+    if (!Enabled()) return;
+    std::call_once(prepare_once, [] { std::thread(Open).detach(); });
+}
+
+/// Present thread: puts a chime on the stream and returns. False while the chimes are still
+/// being prepared (the caller tries again next frame).
+bool Play(bool is_platinum) {
+    const int now = state.load();
+    if (now == Failed) return true; // logged once; nothing to wait for
+    if (now != Ready) return false;
+    const std::vector<float>& samples = is_platinum ? platinum : trophy;
+    SDL_PutAudioStreamData(stream, samples.data(), int(samples.size() * sizeof(float)));
+    return true;
+}
+} // namespace Chime
+
+// The trophy icons (bbport_trophy_icons.h), for the titles whose style says so. The folder is found
+// once; each icon is decoded on a worker thread when its notice is queued. The present thread puts
+// the shown one into ImGui's font atlas (see TrophyIcon below).
+namespace Icons {
+BbTrophyIcons::Cache& Cache() {
+    static BbTrophyIcons::Cache cache = [] {
+        const char* base = SDL_GetBasePath();
+        std::filesystem::path dir = BbTrophyIcons::ResolveDir(std::getenv("BB_TROPHY_ICON_DIR"), base);
+        if (dir.empty())
+            std::fprintf(stderr, "trophy icons: no icon folder (the app's Resources/achievements, or BB_TROPHY_ICON_DIR), notices without icons\n");
+        return BbTrophyIcons::Cache(std::move(dir));
+    }();
+    return cache;
+}
+} // namespace Icons
+
+const TrophyText* TrophyTextFor(const char* title, int id, const char* language) {
     const TrophyText* english = nullptr;
     for (const auto& row : kTrophyTexts) {
-        if (row.id != id) continue;
+        if (row.id != id || std::strcmp(row.title, title) != 0) continue;
         if (std::strcmp(row.language, language) == 0) return &row;
         if (std::strcmp(row.language, "en") == 0) english = &row;
     }
     return english;
 }
 
-void QueueTrophy(int id, bool preview) {
-    const TrophyText* text = TrophyTextFor(id, "en");
+/// Queues a notice for a trophy of the title's catalog (nothing for an id it does not have).
+void QueueTrophy(const TrophyTitle& game, int id, bool preview) {
+    const TrophyText* text = TrophyTextFor(game.title, id, "en");
+    if (!text) return;
+    if (game.style.chime) Chime::Prepare(); // ready well before the notice reaches the front
+    if (game.style.icons) Icons::Cache().Request(id); // decoded off the present thread, well before it shows
     trophy_queue.Push({.id = id, .at = BbTrophyQueue::Clock::now(), .preview = preview,
-                       .platinum = text && std::strcmp(text->grade, "platinum") == 0});
+                       .platinum = std::strcmp(text->grade, "platinum") == 0, .title = game.title});
+}
+
+/// BB_TROPHY_OVERLAY_PREVIEW=1: labelled previews for the running game, recording nothing.
+void QueueTrophyPreview() {
+    const char* notices_off = std::getenv("BB_TROPHY_OVERLAY");
+    const char* preview = std::getenv("BB_TROPHY_OVERLAY_PREVIEW");
+    if (!preview || std::strcmp(preview, "1") != 0 || (notices_off && std::strcmp(notices_off, "0") == 0)) return;
+    for (const TrophyTitle& game : kTrophyTitles) {
+        if (!game.running()) continue;
+        for (int id : game.preview)
+            QueueTrophy(game, id, true);
+    }
 }
 
 // The launcher's design tokens (bloodborne-launcher src/index.css): the menu looks like the app.
@@ -1354,6 +1478,9 @@ void FpsCounter() {
     if (position == BbSettings::FpsTopRight) {
         fps_top_right_bottom = ImGui::GetWindowPos().y + ImGui::GetWindowSize().y;
     }
+    if (position == BbSettings::FpsBottomRight) {
+        fps_bottom_right_top = ImGui::GetWindowPos().y;
+    }
     const float fps = frame_ms_avg > 0.0f ? 1000.0f / frame_ms_avg : 0.0f;
     const ImVec4 health = fps >= 55.0f ? Theme::Foreground : fps >= 30.0f ? Theme::Warning : Theme::PrimaryHover;
     // The number right-aligned in a three-digit slot: the label after it stays in place.
@@ -1750,13 +1877,109 @@ void ApplyTheme() {
     c[ImGuiCol_NavCursor] = Theme::Gold;
 }
 
+/// The bottom edge for a bottom-right notice of `height`, spanning x0..x1: `bottom`, lifted over
+/// whatever the touch controls draw there (at 16:9 the face buttons and R3 end well above it, so
+/// this only acts on unusual window shapes).
+float ClearOfTouchControls(float bottom, float x0, float x1, float height) {
+    if (menu_open || !BbTouch::Shown()) return bottom;
+    const ImVec2 size = ImGui::GetIO().DisplaySize;
+    for (int pass = 0; pass < 4; ++pass) {
+        bool moved = false;
+        for (const BbTouch::View& v : BbTouch::Views(size.x, size.y)) {
+            const bool across = v.x + v.w > x0 && v.x - v.w < x1;
+            const bool down = v.y + v.h > bottom - height && v.y - v.h < bottom;
+            if (across && down) {
+                bottom = v.y - v.h - S(10);
+                moved = true;
+            }
+        }
+        if (!moved) break;
+    }
+    return std::max(bottom, height + S(14));
+}
+
+float trophy_notice_height = 0.0f; ///< present thread: the notice's height on the last frame
+
+// The notice's icon (13 Sentinels). The decoded picture goes into ImGui's font atlas as a custom
+// rect: ImGui's own texture machinery (ImGuiBackendFlags_RendererHasTextures, which the Metal and
+// the Vulkan backend here both set) uploads it, so there is no per-backend texture code. One rect
+// at a time, for the notice on screen; the next icon replaces it. Present thread only.
+constexpr float TrophyIconSize = 60.0f; ///< scaled with S(); the picture is at most BbTrophyIcons::MaxEdge px
+struct TrophyIconView {
+    bool reserve = false; ///< still loading: keep its room in the layout
+    bool have = false;    ///< draw `uv0`..`uv1` of the atlas
+    ImVec2 uv0, uv1;
+};
+ImFontAtlasRectId trophy_icon_rect = ImFontAtlasRectId_Invalid;
+int trophy_icon_for = -1;    ///< the trophy id the rect holds
+int trophy_icon_failed = -1; ///< the id the atlas could not take (not retried every frame)
+
+TrophyIconView TrophyIcon(int id) {
+    TrophyIconView view;
+    if (id == trophy_icon_failed) return view;
+    ImFontAtlas* atlas = ImGui::GetIO().Fonts;
+    ImFontAtlasRect rect;
+    // The UVs change when the atlas texture grows: always read them again.
+    if (trophy_icon_for == id && trophy_icon_rect != ImFontAtlasRectId_Invalid && atlas->GetCustomRect(trophy_icon_rect, &rect)) {
+        view.have = true, view.uv0 = rect.uv0, view.uv1 = rect.uv1;
+        return view;
+    }
+    BbTrophyIcons::Cache& cache = Icons::Cache();
+    switch (cache.Get(id)) {
+    case BbTrophyIcons::Cache::State::Unknown: // never asked, or dropped from the cache: ask again
+        cache.Request(id);
+        [[fallthrough]];
+    case BbTrophyIcons::Cache::State::Loading: view.reserve = true; return view;
+    case BbTrophyIcons::Cache::State::Failed: return view; // logged once by the cache
+    case BbTrophyIcons::Cache::State::Ready: break;
+    }
+    std::optional<BbTrophyIcons::Image> image = cache.Take(id);
+    if (!image) return view;
+    if (trophy_icon_rect != ImFontAtlasRectId_Invalid) atlas->RemoveCustomRect(trophy_icon_rect);
+    trophy_icon_rect = ImFontAtlasRectId_Invalid;
+    trophy_icon_for = -1;
+    trophy_icon_rect = atlas->AddCustomRect(image->w, image->h, &rect);
+    ImTextureData* tex = atlas->TexData;
+    if (trophy_icon_rect == ImFontAtlasRectId_Invalid || !tex || !tex->Pixels || tex->Format != ImTextureFormat_RGBA32) {
+        std::fprintf(stderr, "trophy icon %d: the font atlas cannot take it, no icon\n", id);
+        if (trophy_icon_rect != ImFontAtlasRectId_Invalid) atlas->RemoveCustomRect(trophy_icon_rect);
+        trophy_icon_rect = ImFontAtlasRectId_Invalid;
+        trophy_icon_failed = id;
+        return view;
+    }
+    for (int y = 0; y < image->h; ++y)
+        std::memcpy(tex->GetPixelsAt(rect.x, rect.y + y), &image->rgba[size_t(y) * size_t(image->w) * 4], size_t(image->w) * 4);
+    atlas->TexPixelsUseColors = tex->UseColors = true;
+    ImFontAtlasTextureBlockQueueUpload(atlas, tex, rect.x, rect.y, rect.w, rect.h);
+    trophy_icon_for = id;
+    view.have = true, view.uv0 = rect.uv0, view.uv1 = rect.uv1;
+    return view;
+}
+
 void TrophyToast(std::chrono::steady_clock::time_point now) {
     const BbTrophyQueue::Notice* notice = trophy_queue.Update(now);
-    if (!notice) return;
+    // The chime of a notice that just appeared (retried each frame while the chimes are still
+    // being prepared, so a notice shown at once, as in the preview, is not left silent).
+    static BbTrophyQueue::Clock::time_point chimed{};
+    static bool chime_owed = false;
+    if (notice && trophy_queue.Started() != chimed) {
+        chimed = trophy_queue.Started();
+        const TrophyTitle* game = TrophyTitleFor(notice->title);
+        chime_owed = game && game->style.chime && Chime::Enabled();
+    }
+    if (chime_owed && notice && Chime::Play(notice->platinum)) chime_owed = false;
+    if (!notice) {
+        chime_owed = false;
+        return;
+    }
 
-    const TrophyText* text = TrophyTextFor(notice->id, BbText::Language());
-    const TrophyText* english = TrophyTextFor(notice->id, "en");
+    if (!notice->title) return;
+    const TrophyTitle* game = TrophyTitleFor(notice->title);
+    const bool bottom = game && game->style.corner == BbTrophyStyle::Corner::BottomRight;
+    const TrophyText* text = TrophyTextFor(notice->title, notice->id, BbText::Language());
+    const TrophyText* english = TrophyTextFor(notice->title, notice->id, "en");
     if (!text || !english) return;
+    const TrophyIconView icon = game && game->style.icons ? TrophyIcon(notice->id) : TrophyIconView{};
     const char* description = text->description[0] ? text->description : english->description;
     const ImVec4 metal = std::strcmp(text->grade, "platinum") == 0 ? Theme::Hex(0xcfdee4)
                          : std::strcmp(text->grade, "gold") == 0 ? Theme::Hex(0xe8c976)
@@ -1767,11 +1990,18 @@ void TrophyToast(std::chrono::steady_clock::time_point now) {
     const float alpha = std::clamp(std::min(elapsed / 0.3f, left / 0.3f), 0.0f, 1.0f);
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     const float width = std::min(S(420), viewport->WorkSize.x - S(24));
-    // Below the FPS counter when it is in the same corner (its height depends on its size).
-    ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + viewport->WorkSize.x - S(14),
-                                   fps_top_right_bottom > 0.0f ? fps_top_right_bottom + S(10)
-                                                               : viewport->WorkPos.y + S(14)),
-                            ImGuiCond_Always, ImVec2(1, 0));
+    // In the title's corner, the same margins mirrored; clear of the FPS counter when it is in the
+    // same corner (its height depends on its size), and of the touch controls at the bottom.
+    const float right_edge = viewport->WorkPos.x + viewport->WorkSize.x - S(14);
+    float anchor_y;
+    if (bottom) {
+        anchor_y = fps_bottom_right_top > 0.0f ? fps_bottom_right_top - S(10)
+                                               : viewport->WorkPos.y + viewport->WorkSize.y - S(14);
+        anchor_y = ClearOfTouchControls(anchor_y, right_edge - width, right_edge, trophy_notice_height);
+    } else {
+        anchor_y = fps_top_right_bottom > 0.0f ? fps_top_right_bottom + S(10) : viewport->WorkPos.y + S(14);
+    }
+    ImGui::SetNextWindowPos(ImVec2(right_edge, anchor_y), ImGuiCond_Always, ImVec2(1, bottom ? 1.0f : 0.0f));
     ImGui::SetNextWindowSize(ImVec2(width, 0));
     ImGui::PushStyleVar(ImGuiStyleVar_Alpha, alpha);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, S(12));
@@ -1780,26 +2010,40 @@ void TrophyToast(std::chrono::steady_clock::time_point now) {
     ImGui::PushStyleColor(ImGuiCol_Border, metal);
     ImGui::Begin("##trophy_notice", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
                  ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing);
+    trophy_notice_height = ImGui::GetWindowSize().y;
     ImDrawList* draw = ImGui::GetWindowDrawList();
     const ImVec2 badge = ImGui::GetCursorScreenPos();
     const float cx = badge.x + S(23), cy = badge.y + S(27);
     const ImU32 metal_color = ImGui::GetColorU32(metal);
-    draw->AddCircleFilled(ImVec2(cx, cy), S(22), metal_color);
-    draw->AddCircleFilled(ImVec2(cx, cy), S(18), ImGui::GetColorU32(Theme::Card));
-    // A cup silhouette for every grade; the metallic tint comes from the trophy's grade.
-    draw->AddBezierCubic(ImVec2(cx - S(10), cy - S(9)), ImVec2(cx - S(22), cy - S(13)),
-                         ImVec2(cx - S(18), cy + S(3)), ImVec2(cx - S(8), cy + S(3)),
-                         metal_color, S(2.5f));
-    draw->AddBezierCubic(ImVec2(cx + S(10), cy - S(9)), ImVec2(cx + S(22), cy - S(13)),
-                         ImVec2(cx + S(18), cy + S(3)), ImVec2(cx + S(8), cy + S(3)),
-                         metal_color, S(2.5f));
-    const ImVec2 cup[] = {{cx - S(11), cy - S(11)}, {cx + S(11), cy - S(11)},
-                          {cx + S(7), cy + S(3)}, {cx - S(7), cy + S(3)}};
-    draw->AddConvexPolyFilled(cup, 4, metal_color);
-    draw->AddRectFilled(ImVec2(cx - S(2), cy + S(3)), ImVec2(cx + S(2), cy + S(12)), metal_color);
-    draw->AddRectFilled(ImVec2(cx - S(8), cy + S(12)), ImVec2(cx + S(8), cy + S(15)), metal_color, S(1));
-    ImGui::Dummy(ImVec2(S(54), S(55)));
-    ImGui::SameLine();
+    if (icon.have || icon.reserve) {
+        // The trophy's own picture at the left (13 Sentinels); the cup below is for the others.
+        const float size = S(TrophyIconSize);
+        if (icon.have) {
+            const ImVec2 end(badge.x + size, badge.y + size);
+            draw->AddImageRounded(ImGui::GetIO().Fonts->TexRef, badge, end, icon.uv0, icon.uv1,
+                                  ImGui::GetColorU32(ImVec4(1, 1, 1, 1)), S(8));
+            draw->AddRect(badge, end, metal_color, S(8), 0, S(1.5f));
+        }
+        ImGui::Dummy(ImVec2(size, size));
+        ImGui::SameLine(0, S(14));
+    } else {
+        draw->AddCircleFilled(ImVec2(cx, cy), S(22), metal_color);
+        draw->AddCircleFilled(ImVec2(cx, cy), S(18), ImGui::GetColorU32(Theme::Card));
+        // A cup silhouette for every grade; the metallic tint comes from the trophy's grade.
+        draw->AddBezierCubic(ImVec2(cx - S(10), cy - S(9)), ImVec2(cx - S(22), cy - S(13)),
+                             ImVec2(cx - S(18), cy + S(3)), ImVec2(cx - S(8), cy + S(3)),
+                             metal_color, S(2.5f));
+        draw->AddBezierCubic(ImVec2(cx + S(10), cy - S(9)), ImVec2(cx + S(22), cy - S(13)),
+                             ImVec2(cx + S(18), cy + S(3)), ImVec2(cx + S(8), cy + S(3)),
+                             metal_color, S(2.5f));
+        const ImVec2 cup[] = {{cx - S(11), cy - S(11)}, {cx + S(11), cy - S(11)},
+                              {cx + S(7), cy + S(3)}, {cx - S(7), cy + S(3)}};
+        draw->AddConvexPolyFilled(cup, 4, metal_color);
+        draw->AddRectFilled(ImVec2(cx - S(2), cy + S(3)), ImVec2(cx + S(2), cy + S(12)), metal_color);
+        draw->AddRectFilled(ImVec2(cx - S(8), cy + S(12)), ImVec2(cx + S(8), cy + S(15)), metal_color, S(1));
+        ImGui::Dummy(ImVec2(S(54), S(55)));
+        ImGui::SameLine();
+    }
     ImGui::BeginGroup();
     ImGui::PushStyleColor(ImGuiCol_Text, metal);
     ImGui::TextUnformatted(T(notice->preview ? "trophies.preview" : "trophies.earned"));
@@ -1830,11 +2074,24 @@ void SetBanner(const char* message) {
 }
 
 void TrophyUnlocked(const char* title, int id) {
-    // The catalog is Bloodborne's (The Old Hunters edition, its ids 0..39).
-    if (!Game::IsBloodborne109() || !title || std::strcmp(title, "CUSA03173") || id < 0 || id >= 40) return;
+    // Bloodborne's catalog (The Old Hunters edition) has ids 0..39, 13 Sentinels' 0..55; a title
+    // is shown only while its own game runs.
+    if (!title || id < 0) return;
     const char* off = std::getenv("BB_TROPHY_OVERLAY");
     if (off && std::strcmp(off, "0") == 0) return;
-    QueueTrophy(id, false);
+    for (const TrophyTitle& game : kTrophyTitles) {
+        if (std::strcmp(title, game.title) == 0 && game.running()) QueueTrophy(game, id, false);
+    }
+}
+
+bool TrophyCatalogText(const char* title, int id, const char** name, const char** description, const char** grade) {
+    if (!title) return false;
+    const TrophyText* text = TrophyTextFor(title, id, "en");
+    if (!text || std::strcmp(text->language, "en") != 0) return false;
+    if (name) *name = text->name;
+    if (description) *description = text->description;
+    if (grade) *grade = text->grade;
+    return true;
 }
 
 void SetTextPrompt(bool active, const std::string& prompt, const std::string& text) {
@@ -1929,6 +2186,7 @@ void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count) 
             return;
         }
         initialized = true;
+        QueueTrophyPreview();
         std::printf("Overlay: menu ready (F1 or L3+R3), drawn through Metal\n");
         return;
     }
@@ -1965,13 +2223,7 @@ void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count) 
         return;
     }
     initialized = true;
-    const char* notices_off = std::getenv("BB_TROPHY_OVERLAY");
-    if (const char* preview = std::getenv("BB_TROPHY_OVERLAY_PREVIEW");
-        Game::IsBloodborne109() && preview && std::strcmp(preview, "1") == 0 &&
-        (!notices_off || std::strcmp(notices_off, "0") != 0)) {
-        for (int id : {21, 7, 1, 0, 35})
-            QueueTrophy(id, true);
-    }
+    QueueTrophyPreview();
 #ifdef __APPLE__
     std::printf("Overlay: menu ready (F1 or L3+R3)\n");
 #else
@@ -2458,6 +2710,7 @@ void BuildUi(std::chrono::steady_clock::time_point now) {
         Menu();
     }
     fps_top_right_bottom = 0.0f;
+    fps_bottom_right_top = 0.0f;
     if (BbSettings::Get().show_fps && !menu_open) {
         FpsCounter();
     }

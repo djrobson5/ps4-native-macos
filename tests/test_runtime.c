@@ -518,6 +518,123 @@ static void trophies(void) {
     puts("PASS: local trophy events, IDs, edited-save suppression, env fallback, symlink refusal and notices");
 }
 
+/* The rows of each section of a ledger (src/runtime_trophies.c); -1 when the file is missing. */
+static int ledger_rows(const char *path,int *unlocked,int *grades,int *list) {
+    FILE *f=fopen(path,"r"); if (!f) return -1;
+    char line[512]; int *section=NULL; *unlocked=*grades=*list=0;
+    while (fgets(line,sizeof(line),f)) {
+        if (line[0]==';' || line[0]=='\n') continue;
+        if (!strncmp(line,"[unlocked]",10)) section=unlocked;
+        else if (!strncmp(line,"[grades]",8)) section=grades;
+        else if (!strncmp(line,"[list]",6)) section=list;
+        else if (section && strstr(line," = ")) ++*section;
+    }
+    fclose(f); return 0;
+}
+/* The value after "KEY = " in a ledger's section, or "" when it has no such row. */
+static void ledger_value(const char *path,const char *section,int key,char *out,size_t size) {
+    FILE *f=fopen(path,"r"); char line[512],want[16],header[32]; int in=0; out[0]=0;
+    assert(f); snprintf(want,sizeof(want),"%d = ",key); snprintf(header,sizeof(header),"[%s]",section);
+    while (fgets(line,sizeof(line),f)) {
+        if (line[0]=='[') in=!strncmp(line,header,strlen(header));
+        else if (in && !strncmp(line,want,strlen(want))) {
+            snprintf(out,size,"%s",line+strlen(want)); out[strcspn(out,"\n")]=0; break;
+        }
+    }
+    fclose(f);
+}
+static void seed_log(const char *path,const char *title,int first,int last,long long stamp) {
+    FILE *f=fopen(path,"a"); assert(f);
+    for (int id=first;id<=last;++id) fprintf(f,"v1 %lld %s %d\n",stamp+id,title,id);
+    assert(fclose(f)==0);
+}
+static void sentinels_trophies(void) {
+    char root[]="/tmp/bb-trophy13-test-XXXXXX", previous[512], path[640], ledger[640], text[512];
+    snprintf(previous,sizeof(previous),"%s",runtime_file_user_dir());
+    assert(mkdtemp(root));
+    runtime_file_configure(root,root);
+    snprintf(path,sizeof(path),"%s/trophies-v1.log",root);
+    snprintf(ledger,sizeof(ledger),"%s/achievements.txt",root);
+    typedef int32_t (ABI *Unlock)(int32_t,int32_t,int32_t,int32_t *);
+    typedef int32_t (ABI *State)(int32_t,int32_t,uint32_t *,uint32_t *);
+    Unlock unlock=GET(Unlock,"28xmRUFao68#l#m");
+    State state=GET(State,"LHuSmO3SLd8#l#m");
+    assert(unlock && state);
+    int unlocked,grades,list;
+    /* Seeded: 1..54 recorded long ago (id 1 twice, the later stamp first: the earliest shows). */
+    FILE *f=fopen(path,"w"); assert(f); fputs("v1 1700090000 CUSA19610 1\n",f); assert(fclose(f)==0);
+    seed_log(path,"CUSA19610",1,54,1700000000LL);
+    seed_log(path,"CUSA03173",55,55,1700000000LL); /* another title's line is not ours */
+    int before=notified_count;
+    runtime_trophy_configure("CUSA19610");
+    /* Start-up: the whole catalog shows, 54 earned, before any unlock. */
+    assert(ledger_rows(ledger,&unlocked,&grades,&list)==0 && unlocked==54 && grades==56 && list==56);
+    ledger_value(ledger,"list",0,text,sizeof(text)); assert(!strncmp(text,"13 Sentinels: Aegis Rim | ",26));
+    ledger_value(ledger,"list",42,text,sizeof(text));
+    assert(!strncmp(text,"Defended the 1st Area | ",24) && !strchr(strchr(text,'|')+1,'|'));
+    ledger_value(ledger,"grades",0,text,sizeof(text)); assert(!strcmp(text,"platinum"));
+    ledger_value(ledger,"grades",45,text,sizeof(text)); assert(!strcmp(text,"gold"));
+    ledger_value(ledger,"grades",40,text,sizeof(text)); assert(!strcmp(text,"silver"));
+    ledger_value(ledger,"grades",55,text,sizeof(text)); assert(!strcmp(text,"silver"));
+    ledger_value(ledger,"grades",30,text,sizeof(text)); assert(!strcmp(text,"bronze"));
+    ledger_value(ledger,"unlocked",55,text,sizeof(text)); assert(!text[0]);
+    ledger_value(ledger,"unlocked",0,text,sizeof(text)); assert(!text[0]);
+    {
+        time_t at=1700000001; struct tm local; char want[32];
+        assert(localtime_r(&at,&local) && strftime(want,sizeof(want),"%Y-%m-%d %H:%M",&local)==16);
+        ledger_value(ledger,"unlocked",1,text,sizeof(text)); assert(!strcmp(text,want)); /* the earliest of id 1 */
+    }
+    /* Unlock state: the flags are the earned set, the count the set's size. */
+    uint32_t flags[4]={9,9,9,9}, count=0;
+    assert(state(1,1,flags,&count)==0 && count==56);
+    assert(flags[0]==0xfffffffeu && flags[1]==0x007fffffu && !flags[2] && !flags[3]); /* ids 1..54 */
+    /* Edited saves earn nothing, and the ledger and the log stay as they were. */
+    char save[640],marker[640]; struct stat log_before,log_after,ledger_before,ledger_after;
+    snprintf(save,sizeof(save),"%s/savedata",root); assert(mkdir(save,0700)==0);
+    snprintf(marker,sizeof(marker),"%s/savedata/.bb-edited",root);
+    f=fopen(marker,"w"); assert(f); fclose(f);
+    int32_t platinum=42;
+    assert(stat(path,&log_before)==0 && stat(ledger,&ledger_before)==0);
+    assert(unlock(1,1,55,&platinum)==0 && platinum==-1);
+    assert(stat(path,&log_after)==0 && stat(ledger,&ledger_after)==0);
+    assert(log_before.st_size==log_after.st_size && ledger_before.st_ino==ledger_after.st_ino);
+    assert(ledger_rows(ledger,&unlocked,&grades,&list)==0 && unlocked==54);
+    assert(state(1,1,flags,&count)==0 && flags[0]==0xfffffffeu && flags[1]==0x007fffffu && count==56);
+    assert(notified_count==before);
+    assert(unlink(marker)==0);
+    /* The last one: 55 is recorded, the platinum (0) follows and is reported back. */
+    assert(unlock(1,1,55,&platinum)==0 && platinum==0);
+    assert(notified_count==before+2 && notified[before]==55 && notified[before+1]==0);
+    f=fopen(path,"r"); assert(f);
+    int found55=0,found0=0; char title[17]; long long stamp; int id;
+    while (fgets(text,sizeof(text),f))
+        if (sscanf(text,"v1 %lld %16s %d",&stamp,title,&id)==3 && !strcmp(title,"CUSA19610")) {
+            found55+=id==55; found0+=id==0;
+        }
+    fclose(f); assert(found55==1 && found0==1);
+    assert(ledger_rows(ledger,&unlocked,&grades,&list)==0 && unlocked==56 && grades==56 && list==56);
+    ledger_value(ledger,"unlocked",0,text,sizeof(text)); assert(strlen(text)==16);
+    assert(state(1,1,flags,&count)==0 && count==56 && flags[0]==0xffffffffu && flags[1]==0x00ffffffu &&
+           !flags[2] && !flags[3]); /* ids 0..55 */
+    /* Again: nothing new, no second platinum. */
+    assert(unlock(1,1,55,&platinum)==0 && platinum==-1 && notified_count==before+2);
+    /* Reconfiguring (a restart) rereads the history and rewrites the ledger. */
+    assert(unlink(ledger)==0);
+    runtime_trophy_configure("CUSA19610");
+    assert(ledger_rows(ledger,&unlocked,&grades,&list)==0 && unlocked==56 && list==56);
+    /* Another title keeps no ledger and reports nothing earned. */
+    assert(unlink(ledger)==0);
+    runtime_trophy_configure("CUSA03173");
+    assert(ledger_rows(ledger,&unlocked,&grades,&list)==-1);
+    flags[0]=flags[1]=flags[2]=flags[3]=7; count=7;
+    assert(state(1,1,flags,&count)==0 && count==0 && !flags[0] && !flags[1] && !flags[2] && !flags[3]);
+    assert(unlink(path)==0); assert(rmdir(save)==0);
+    const char *folders[]={"temp0","download0","data"};
+    for (int i=0;i<3;++i) { snprintf(path,sizeof(path),"%s/%s",root,folders[i]); assert(rmdir(path)==0); }
+    assert(rmdir(root)==0); runtime_file_configure(previous,previous);
+    puts("PASS: 13 Sentinels trophies: platinum, ledger, unlock state, edited-save suppression");
+}
+
 int main(int argc,char **argv) {
     runtime_start(0); assert(runtime_resolve("bzQExy189ZI#q#q",0)==0);
     runtime_start(1);
@@ -549,6 +666,7 @@ int main(int argc,char **argv) {
     libc_support(); posix_mutexes(); wall_time(); exit_handlers(); guards(); mutexes(); conditions(); direct_memory(); write_traps(); memory_primitives();
     rw_lifecycle(); rw_concurrency(); rw_timeouts();
     trophies();
+    sentinels_trophies();
     puts("PASS: callback lifecycle, guard ABI, mutex and condition errors, shared direct memory, memory primitives, resolver scope");
     return 0;
 }

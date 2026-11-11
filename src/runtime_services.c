@@ -358,12 +358,13 @@ static ABI int32_t trophy_info(int32_t ctx,int32_t handle,int32_t id,void *detai
     (void)id; return trophy_game_info(ctx,handle,details,data);
 }
 
-/* 13 Sentinels (NpToolkit2): the unlock flags of a title this port keeps no trophy archive for are
- * all clear, and handles and contexts need no teardown. */
+/* 13 Sentinels (NpToolkit2): the earned set comes from the local history for a title with its own
+ * catalog (runtime_trophy_state); any other title (Bloodborne) has all flags clear and count 0.
+ * Handles and contexts need no teardown. */
 static ABI int32_t trophy_unlock_state(int32_t ctx,int32_t handle,uint32_t *flags,uint32_t *count) {
     (void)ctx; (void)handle;
     if (!flags || !count) return TROPHY_INVALID;
-    memset(flags,0,16); *count=0;
+    if (!runtime_trophy_state(flags,count)) { memset(flags,0,16); *count=0; }
     return 0;
 }
 

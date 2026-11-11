@@ -36,6 +36,15 @@ int main() {
     assert(!queue.Update(t1 + ShownPlatinum));
     assert(!queue.Update(t1 + ShownPlatinum + Gap) && !queue.Pending());
 
-    std::puts("PASS: trophy notice queue: capacity, display times, gap, expiry, platinum");
+    // A notice carries its game's title: ids repeat across games.
+    const auto t2 = t1 + 2min;
+    static const char sentinels[] = "CUSA19610";
+    assert(queue.Push({.id = 0, .at = t2, .platinum = true, .title = sentinels}));
+    shown = queue.Update(t2);
+    assert(shown && shown->id == 0 && shown->title == sentinels);
+    assert(!queue.Update(t2 + ShownPlatinum) && !queue.Update(t2 + ShownPlatinum + Gap));
+    assert(queue.Push({.id = 3, .at = t2 + 1min}) && queue.Update(t2 + 1min)->title == nullptr);
+
+    std::puts("PASS: trophy notice queue: capacity, display times, gap, expiry, platinum, title");
     return 0;
 }

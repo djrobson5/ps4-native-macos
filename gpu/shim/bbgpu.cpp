@@ -278,6 +278,11 @@ extern "C" void bbgpu_trophy_notification(const char* title, int id) {
     BbOverlay::TrophyUnlocked(title, id);
 }
 
+extern "C" int bbgpu_trophy_catalog_text(const char* title, int id, const char** name, const char** description,
+                                         const char** grade) {
+    return BbOverlay::TrophyCatalogText(title, id, name, description, grade) ? 1 : 0;
+}
+
 extern "C" void bbgpu_overlay_banner(const char* message) {
     BbOverlay::SetBanner(message);
 }

@@ -96,6 +96,9 @@ uintptr_t runtime_services_resolve(const char *name);
 /* Online play (runtime_net.c, BB_ONLINE=1): the online module answers the network and PSN imports. */
 void runtime_trophy_configure(const char *title);
 int32_t runtime_trophy_unlock(int32_t id, int32_t *platinum);
+/* The earned set of a title with its own catalog (13 Sentinels) as a SceNpTrophyFlagArray and the
+ * number of trophies in the set; 0, and nothing written, for any other title. */
+int runtime_trophy_state(uint32_t flags[4], uint32_t *count);
 void runtime_net_configure(const char *app0, const char *serial, const char *title, const char *version);
 int runtime_net_enabled(void);
 int runtime_net_symbol(const char *symbol);

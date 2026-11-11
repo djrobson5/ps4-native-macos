@@ -23,6 +23,7 @@ struct Notice {
     Clock::time_point at{};
     bool preview = false;
     bool platinum = false;
+    const char* title = nullptr; ///< the game's TITLE_ID (a string that lives on): ids repeat across games
 };
 
 class Queue {

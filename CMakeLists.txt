@@ -316,6 +316,13 @@ if (BUILD_TESTING)
         set_tests_properties(runtime-test sema-test file-mods-test PROPERTIES DISABLED TRUE)
     endif()
 
+    # The trophy catalogs and their generator (a catalog with a gap in its ids is refused).
+    find_package(Python3 COMPONENTS Interpreter)
+    if (Python3_Interpreter_FOUND)
+        add_test(NAME trophy-catalog COMMAND Python3::Interpreter -I
+                 ${CMAKE_SOURCE_DIR}/tests/test_trophy_catalog.py)
+    endif()
+
     # The loader test builds a guest image with 4 KiB pages; macOS has 16 KiB ones.
     find_package(Python3 COMPONENTS Interpreter)
     if (Python3_Interpreter_FOUND)
