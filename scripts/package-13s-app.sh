@@ -83,7 +83,7 @@ fi
 
 minos=$(otool -l "$payload/Contents/MacOS/bb-probe" | awk '/LC_BUILD_VERSION/{f=1} f&&/minos/{print $2; exit}')
 commit=$(git -C "$repo" rev-parse --short HEAD)
-dirty=$(git -C "$repo" status --porcelain --untracked-files=no | grep -v '^ m bbcpu$' | head -1 || true)
+dirty=$(git -C "$repo" status --porcelain --untracked-files=no | grep -v '^ [Mm] bbcpu$' | head -1 || true)
 [[ -n $dirty ]] && commit=$commit+dirty
 cat >"$app/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
