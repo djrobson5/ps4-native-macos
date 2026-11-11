@@ -7,6 +7,7 @@
 #include "bbport_heap_sites.h"
 #include "platform.h"
 #include "bbport_guest_call.h"
+#include "game_profile.h"
 
 #include <algorithm>
 #include <atomic>
@@ -218,6 +219,11 @@ bool InGame(u64 v) {
 
 namespace {
 void InstallWrappers(bool counters) {
+    // The slot table, the text bound and the libc base above are Bloodborne 1.09's: another game's
+    // image has no table there (a write past its mapping crashed 13 Sentinels in sceGnmSubmitDone).
+    if (!Game::IsBloodborne109()) {
+        return;
+    }
     static const bool wanted = [] {
         const char* env = std::getenv("BB_HEAP_SITES");
         return env && env[0] == '1';

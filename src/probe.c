@@ -46,6 +46,14 @@ static LinkedModule modules[16];
 static uint64_t module_count;
 static int entered_game;
 static int gpu_enabled;
+/* From the prepared executable (bb_boot_prepare/bb_boot_link), for diagnostics: the library each
+ * import comes from and the file each linked module was loaded from. */
+static char (*import_libs)[40];
+static const char *module_files[16];
+/* 0 for 13 Sentinels: the Bloodborne 1.09 addresses (game lock, command buffer guards) stay
+ * untouched. A boot file read from disk is taken to be Bloodborne's, as before. */
+static int bloodborne_image=1;
+static const char *import_library(uint64_t id) { return import_libs && import_libs[id][0] ? import_libs[id] : "?"; }
 int vulkan_smoke(void);
 
 static __attribute__((noreturn)) void fail(const char *message) { fprintf(stderr, "ERROR: %s\n", message); exit(1); }
@@ -127,16 +135,39 @@ static void protect(void *p, size_t size, unsigned flags) {
     if (mprotect(p, size, mode)) fail("mprotect failed");
 #endif
 }
-static ABI __attribute__((noreturn)) void unresolved(uint32_t id, uintptr_t argument) {
-    if (id >= import_count) fail("bad import trap index");
-    printf("STOP: first unsupported PS4 import: %s (index %u)\n", names[id], id);
-    printf("API: %s\n", runtime_import_name(names[id]));
-    printf("Caller return offset: 0x%" PRIxPTR "; first argument: 0x%" PRIxPTR "\n",
-           (uintptr_t)__builtin_return_address(0) - (uintptr_t)image, argument);
-    uintptr_t caller=(uintptr_t)__builtin_return_address(0)-(uintptr_t)image;
+/* The guest address a trap was called from, as an image offset (0 when unknown). Under bbcpu the
+ * host return address is the translator's; the guest's is read at its stack pointer. */
+static uintptr_t trap_caller(void) {
+    uintptr_t at=(uintptr_t)__builtin_return_address(0);
+#ifdef BB_HAVE_BBCPU
+    if (bbcpu_enabled()) at=(uintptr_t)bbcpu_import_return();
+#endif
+    return at>=(uintptr_t)image ? at-(uintptr_t)image : 0;
+}
+static void print_trap(uint32_t id, uintptr_t argument, const char *what) {
+    printf("%s: %s (index %u)\n", what, names[id], id);
+    printf("API: %s (library %s)\n", runtime_import_name(names[id]), import_library(id));
+    const uintptr_t caller=trap_caller();
+    printf("Caller return offset: 0x%" PRIxPTR "; first argument: 0x%" PRIxPTR "\n", caller, argument);
     for (uint64_t m=0;m<module_count;++m)
         if (caller>=modules[m].base && caller-modules[m].base<modules[m].size)
-            printf("Caller in linked module %" PRIu64 " (%s): +0x%" PRIx64 "\n",m,m==0 ? "libc.prx" : "system module",(uint64_t)(caller-modules[m].base));
+            printf("Caller in linked module %" PRIu64 " (%s): +0x%" PRIx64 "\n",m,module_files[m] ? module_files[m] : "system module",(uint64_t)(caller-modules[m].base));
+    if (caller && caller<modules[0].base) printf("Caller in the executable: +0x%" PRIxPTR "\n",caller);
+}
+/* BB_TRACE_UNRESOLVED=N (diagnostic, off by default): the first N calls of unresolved imports are
+ * logged and answered with 0 instead of stopping the game (nothing is implemented: answers are
+ * wrong and the game will go wrong; it shows the order the game needs imports in). */
+static ABI uint64_t unresolved(uint32_t id, uintptr_t argument) {
+    if (id >= import_count) fail("bad import trap index");
+    static int trace_limit=-1; static int traced;
+    if (trace_limit<0) { const char *e=getenv("BB_TRACE_UNRESOLVED"); trace_limit=e ? atoi(e) : 0; }
+    if (traced<trace_limit) {
+        ++traced;
+        printf("TRACE #%d: ",traced);
+        print_trap(id,argument,"call of an unresolved import (answered 0)");
+        return 0;
+    }
+    print_trap(id,argument,"STOP: first unsupported PS4 import");
     runtime_report();
     puts(entered_game ? "Original guest entry instructions executed; game initialization is incomplete." :
                         "Native libc initialization is incomplete; game entry has not run.");
@@ -480,10 +511,14 @@ int main(int argc, char **argv) {
     check_cpu(); /* macOS: bbcpu (arm64) or Rosetta 2 (x86-64), which reports none of them */
 #endif
     int cpu_only = 0, strict_imports = 0;
+    /* --headless / --cpu-only: no GPU library is initialized, so no window, no Dock icon and no
+     * Metal or Vulkan device exist (bbgpu_init, which builds the window and the presenter, is the
+     * only place that makes them); the GPU's imports stay unresolved and the game's code runs on
+     * the main thread. BB_LIST_UNRESOLVED=1 lists the unresolved imports; =only lists and exits. */
     unsigned timeout_seconds = 10;
     const char *content_profile=NULL, *app0=NULL, *user_dir=NULL, *patch_file=NULL;
     for (int i = 2; i < argc; ++i) {
-        if (!strcmp(argv[i], "--cpu-only")) cpu_only = 1;
+        if (!strcmp(argv[i], "--cpu-only") || !strcmp(argv[i], "--headless")) cpu_only = 1;
         else if (!strcmp(argv[i], "--strict-imports")) strict_imports = 1;
         else if (!strcmp(argv[i], "--content-profile") && i+1<argc) content_profile=argv[++i];
         else if (!strcmp(argv[i], "--app0") && i+1<argc) app0=argv[++i];
@@ -565,6 +600,11 @@ int main(int argc, char **argv) {
         }
         printf("Prepared: image %llu bytes, %zu modules linked, %zu imports, %zu native bindings\n",
                (unsigned long long)boot.size, boot.module_count, boot.name_count, boot.binding_count);
+        printf("Executable image SHA-256 %s (%s)\n", boot.image_sha256, boot.not_bloodborne ? "13 Sentinels" : "Bloodborne's path");
+        bloodborne_image = !boot.not_bloodborne;
+        if (boot.not_bloodborne) runtime_13s_enable(); /* 13 Sentinels' own imports (runtime_extra.c, runtime_eventflag.c) */
+        import_libs = boot.libraries, boot.libraries = NULL;
+        for (size_t m = 0; m < boot.module_count && m < 16; ++m) module_files[m] = boot.modules[m].file;
         /* An unnamed temporary file, not a growing memory stream: a stream reallocates and copies
          * as it grows (about 94 MB), and inside a launcher app the address space had no block that
          * large left (ENOMEM on the iPhone). */
@@ -681,7 +721,10 @@ int main(int argc, char **argv) {
     runtime_native_load(bb_image_base);
     if (fread(image, 1, size, f) != size || fgetc(f) != EOF) fail("incorrect memory image size");
     fclose(f);
-    runtime_game_lock_load(bb_image_base);
+    if (bloodborne_image) runtime_game_lock_load(bb_image_base);
+    /* Which game this is, before the GPU library starts: it runs its Bloodborne 1.09 hooks, icons,
+     * notices and watchers only for Bloodborne (default: not). */
+    bbgpu_set_game(bloodborne_image);
     if (!cpu_only) {
         char title[128]="Bloodborne", serial[16]="UNKNOWN", sfo[4096];
         uint32_t attributes=0;
@@ -709,6 +752,13 @@ int main(int argc, char **argv) {
         t[8] = 0x48; t[9] = 0xb8; memcpy(t + 10, &handler, 8);
         t[18] = 0xff; t[19] = 0xe0;
     }
+    /* BB_LIST_UNRESOLVED=1: every import left to a trap, once each, before the game starts (the
+     * first call to one still stops the game); =only: the list, then exit 0 without running it.
+     * One line each: "Unresolved import<TAB>NID<TAB>library<TAB>function|data<TAB>symbol name". */
+    const char *list_mode=getenv("BB_LIST_UNRESOLVED");
+    const int list_only=list_mode && !strcmp(list_mode,"only");
+    unsigned char *listed=list_mode && (list_only || !strcmp(list_mode,"1")) ? calloc(import_count ? import_count : 1,1) : NULL;
+    uint64_t trapped=0;
     const uint32_t tls_displacement = bb_guest_tls_displacement();
     for (uint64_t i = 0; i < nr; ++i) {
         if (relocs[i].kind == RELOC_TLS_SLOT) { memcpy(image + relocs[i].target, &tls_displacement, 4); continue; }
@@ -723,12 +773,28 @@ int main(int argc, char **argv) {
                 if (binding_kinds[relocs[i].value]!=relocs[i].kind || !mapped(segments,ns,address,relocs[i].addend+1)) fail("native export kind/range mismatch");
                 const uintptr_t host=runtime_resolve_native(names[relocs[i].value],relocs[i].kind==2,(uintptr_t)image+address);
                 value=(host ? host : (uintptr_t)image+address)+relocs[i].addend;
+            } else if (listed && !listed[relocs[i].value]) {
+                listed[relocs[i].value]=1; ++trapped;
+                const char *nid_end=strchr(names[relocs[i].value],'#');
+                printf("Unresolved import\t%.*s\t%s\t%s\t%s\n",
+                       nid_end ? (int)(nid_end-names[relocs[i].value]) : (int)strlen(names[relocs[i].value]),names[relocs[i].value],
+                       import_library(relocs[i].value),relocs[i].kind==2 ? "data" : "function",
+                       runtime_symbol(names[relocs[i].value]) ? runtime_symbol(names[relocs[i].value]) : "?");
             }
         }
         memcpy(image + relocs[i].target, &value, 8);
     }
+    if (listed) {
+        printf("Unresolved imports: %" PRIu64 " of %" PRIu64 "\n", trapped, import_count);
+        free(listed);
+        if (list_only) { fflush(NULL); _exit(0); }
+    }
     runtime_net_image_mapped(image, size);
-    if (patch_file) {
+    if (patch_file && !bloodborne_image && !strcmp(patch_file,"-")) {
+        /* `-` builds Bloodborne's patches (patches/Bloodborne.xml, bbport.ini's game patches): their
+         * addresses are 1.09's. Another game's patch file is named explicitly. */
+        printf("Patches: not applied (`-` is Bloodborne's patch set; the executable is not Bloodborne 1.09's)\n");
+    } else if (patch_file) {
         /* `-`: patches.bin built here from the patch file, bbport.ini and the player's patch folder
          * (runtime_patches.c), with the inputs run.sh gave scripts/patches.py. */
         uint8_t *patch_memory=NULL;
@@ -762,7 +828,11 @@ int main(int argc, char **argv) {
         apply_patches(pf, segments, ns, relocs, nr); /* closes pf */
         free(patch_memory);
     }
-    if (!cpu_only) bbgpu_patch_image(image, size);
+    /* The GPU library's guest hooks and patches (frame rate, game hooks, game menu, engine fixes) are
+     * written for Bloodborne 1.09 and read its offsets, which lie past 13 Sentinels' 27 MB image:
+     * not for another game's executable. (The hook installer also refuses an address outside the image.) */
+    bbgpu_set_guest_image(image, size); /* any image: a hook outside it is refused before it is read */
+    if (!cpu_only && bloodborne_image) bbgpu_patch_image(image, size);
     protect(traps, round_page((import_count + 1) * 32), 5);
     protect(image, round_page(size), 0);
     int executable_entry = 0;
@@ -786,7 +856,7 @@ int main(int argc, char **argv) {
         /* Recompiled functions: checked against the code as patched above. */
         bbcpu_recomp_load(bb_image_base);
         /* Command buffer guards and probes: checked against the mapped code. */
-        runtime_cmdbuf_load(bb_image_base);
+        if (bloodborne_image) runtime_cmdbuf_load(bb_image_base);
     }
 #endif
     game.native_libc=native_libc; game.ns=ns; game.nb=nb; game.procparam=procparam; game.entry=entry;

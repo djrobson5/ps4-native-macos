@@ -11,6 +11,9 @@
 
 /* The executable's image this port runs (scripts/game_check.py's SUPPORTED_IMAGE). */
 static const char SUPPORTED_IMAGE[] = "071df19c8880086d97182dbc057bc8cb37badaca57d9112683836b24a0444c0a";
+/* The other executable this runtime boots: 13 Sentinels: Aegis Rim, CUSA19610 1.00 (eboot.bin
+ * SHA-256 cf7e9093...5950). Its image is checked the same way; Bloodborne's hooks stay off for it. */
+static const char SUPPORTED_IMAGE_13S[] = "1623190dc1a74bb9a78739fc50132ade2fc14b3d34ab7488dc1432fd98254c07";
 /* The NID of _init_env (SHA-1 of the name and the PS4's salt; scripts/prepare.py's nid()). */
 static const char INIT_ENV_NID[] = "bzQExy189ZI";
 
@@ -299,7 +302,7 @@ static int init_env_is_ret(const char *game_dir, int *result, char *error, size_
 
 void bb_boot_free(BbBoot *boot) {
     free(boot->loads), free(boot->names), free(boot->relocs), free(boot->image);
-    free(boot->modules), free(boot->bindings);
+    free(boot->modules), free(boot->bindings), free(boot->libraries);
     memset(boot, 0, sizeof(*boot));
 }
 
@@ -387,9 +390,10 @@ int bb_boot_prepare(const char *game_dir, BbBoot *boot, char *error, size_t erro
     /* Only the supported executable runs (scripts/game_check.py); others fail in the game's code. */
     bb_sha256_hex(boot->image, size, boot->image_sha256);
     const char *skip = getenv("BB_SKIP_GAME_CHECK");
-    if (!(skip && skip[0] == '1') && strcmp(boot->image_sha256, SUPPORTED_IMAGE)) {
-        fail(error, error_size, "this is not Bloodborne 1.09's executable (image %.12s...): only update 1.09 runs",
-             boot->image_sha256);
+    boot->not_bloodborne = !strcmp(boot->image_sha256, SUPPORTED_IMAGE_13S);
+    if (!(skip && skip[0] == '1') && !boot->not_bloodborne && strcmp(boot->image_sha256, SUPPORTED_IMAGE)) {
+        fail(error, error_size, "this is not Bloodborne 1.09's or 13 Sentinels 1.00's executable (image %.12s...): "
+             "only those run", boot->image_sha256);
         goto done;
     }
 
@@ -786,20 +790,38 @@ static int patch_fs_loads(BbBoot *boot, const Elf *elf, uint64_t base, size_t *p
     return 0;
 }
 
-static int add_name(BbBoot *boot, const char *name) {
+/* Appends an import name; `library` (its library's name) goes to boot->libraries at the same index. */
+static int add_name(BbBoot *boot, const char *name, const char *library) {
     char (*grown)[128] = realloc(boot->names, (boot->name_count + 1) * sizeof(*grown));
     if (!grown) return -1;
     boot->names = grown;
+    char (*libraries)[40] = realloc(boot->libraries, (boot->name_count + 1) * sizeof(*libraries));
+    if (!libraries) return -1;
+    boot->libraries = libraries;
+    snprintf(libraries[boot->name_count], sizeof(*libraries), "%s", library ? library : "");
     snprintf(boot->names[boot->name_count++], 128, "%s", name);
     return 0;
 }
 
+/* Whether the module's imports include a library of this name. */
+static int imports_library(const Module *m, const char *name) {
+    for (size_t i = 0; i < m->library_count; ++i)
+        if (!strcmp(m->libraries[i].name, name)) return 1;
+    return 0;
+}
+
 int bb_boot_link(const char *game_dir, BbBoot *boot, char *error, size_t error_size) {
-    static const char *const MODULES[] = {"libc.prx", "libSceFios2.prx"};
+    /* libc and Fios2 for every game; libSceNpToolkit2.prx third when the executable imports it
+     * (13 Sentinels bundles it: its TLS module number follows libc's and Fios2's, which the
+     * numbering below gives it). */
+    static const char *const NPTOOLKIT2 = "libSceNpToolkit2.prx";
+    const char *MODULES[3] = {"libc.prx", "libSceFios2.prx", NULL};
+    size_t module_total = 2;
     char path[4096];
     snprintf(path, sizeof(path), "%s/eboot.bin", game_dir);
     Module main;
     if (read_module(path, &main, error, error_size)) return -1;
+    if (imports_library(&main, "libSceNpToolkit2")) MODULES[module_total++] = NPTOOLKIT2;
     Map identities = {0}, exports = {0}, by_nid = {0};
     struct Export { uint64_t address, kind; } *export_list = NULL;
     struct Nid { size_t count; uint64_t address, kind; } *nid_list = NULL;
@@ -808,9 +830,13 @@ int bb_boot_link(const char *game_dir, BbBoot *boot, char *error, size_t error_s
     Module m = {0};
 
     /* The executable's imports by identity (a name without one counts as the empty identity). */
+    boot->libraries = calloc(boot->name_count ? boot->name_count : 1, sizeof(*boot->libraries));
+    if (!boot->libraries) { fail(error, error_size, "out of memory"); goto done; }
     for (size_t i = 0; i < boot->name_count; ++i) {
         int bad = 0;
-        char *key = identity_of(&main, boot->names[i], NULL, &bad);
+        const char *library = NULL;
+        char *key = identity_of(&main, boot->names[i], &library, &bad);
+        if (library) snprintf(boot->libraries[i], sizeof(*boot->libraries), "%s", library);
         if (bad) { fail(error, error_size, "eboot.bin: an import of an unknown library or module"); goto done; }
         const int64_t put = map_put(&identities, key ? key : "", (int64_t)i);
         free(key);
@@ -825,7 +851,7 @@ int bb_boot_link(const char *game_dir, BbBoot *boot, char *error, size_t error_s
     uint64_t image_capacity = 0;
     {
         uint64_t end = base, next = base;
-        for (size_t f = 0; f < sizeof(MODULES) / sizeof(*MODULES); ++f) {
+        for (size_t f = 0; f < module_total; ++f) {
             snprintf(path, sizeof(path), "%s/sce_module/%s", game_dir, MODULES[f]);
             if (read_module(path, &m, error, error_size)) goto done;
             uint64_t modsize = 0;
@@ -842,7 +868,7 @@ int bb_boot_link(const char *game_dir, BbBoot *boot, char *error, size_t error_s
         if (!grown) goto oom;
         boot->image = grown, image_capacity = end;
     }
-    for (size_t f = 0; f < sizeof(MODULES) / sizeof(*MODULES); ++f) {
+    for (size_t f = 0; f < module_total; ++f) {
         const char *file = MODULES[f];
         snprintf(path, sizeof(path), "%s/sce_module/%s", game_dir, file);
         if (read_module(path, &m, error, error_size)) goto done;
@@ -930,7 +956,7 @@ int bb_boot_link(const char *game_dir, BbBoot *boot, char *error, size_t error_s
                     else
                         snprintf(name, sizeof(name), "%.*s#%s", (int)(nid_end - sym->name), sym->name, sym->library);
                     index = (int64_t)boot->name_count;
-                    if (add_name(boot, name) || map_put(&identities, sym->identity, index) < 0) goto oom;
+                    if (add_name(boot, name, sym->library) || map_put(&identities, sym->identity, index) < 0) goto oom;
                 }
                 if (push_reloc(boot, &boot->reloc_capacity, (BbBootReloc){target, import_kind, index, addend})) goto oom;
             }
@@ -966,7 +992,7 @@ int bb_boot_link(const char *game_dir, BbBoot *boot, char *error, size_t error_s
         boot->modules = table;
         boot->modules[boot->module_count++] = (struct BbBootModule){
             base, modsize, base + (has_init ? init : 0), tls ? base + tls->vaddr : 0, tls ? tls->memsz : 0,
-            tls ? tls->filesz : 0, module_id};
+            tls ? tls->filesz : 0, module_id, file};
         base = (base + modsize + 65535) & ~(uint64_t)65535;
         module_free(&m);
     }

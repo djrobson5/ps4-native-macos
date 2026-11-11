@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "bbport_game_hooks.h"
+#include "game_profile.h"
 #include "bbport_overlay.h"
 #include "bbport_touch_controls.h"
 
@@ -1826,7 +1827,8 @@ void SetBanner(const char* message) {
 }
 
 void TrophyUnlocked(const char* title, int id) {
-    if (!title || std::strcmp(title, "CUSA03173") || id < 0 || id >= 40) return;
+    // The catalog is Bloodborne's (The Old Hunters edition, its ids 0..39).
+    if (!Game::IsBloodborne109() || !title || std::strcmp(title, "CUSA03173") || id < 0 || id >= 40) return;
     const char* off = std::getenv("BB_TROPHY_OVERLAY");
     if (off && std::strcmp(off, "0") == 0) return;
     QueueTrophy(id, false);
@@ -1962,7 +1964,7 @@ void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count) 
     initialized = true;
     const char* notices_off = std::getenv("BB_TROPHY_OVERLAY");
     if (const char* preview = std::getenv("BB_TROPHY_OVERLAY_PREVIEW");
-        preview && std::strcmp(preview, "1") == 0 &&
+        Game::IsBloodborne109() && preview && std::strcmp(preview, "1") == 0 &&
         (!notices_off || std::strcmp(notices_off, "0") != 0)) {
         for (int id : {21, 7, 1, 0, 35})
             QueueTrophy(id, true);

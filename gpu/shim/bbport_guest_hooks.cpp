@@ -4,6 +4,7 @@
 #include "bbport_guest_code_hooks.h"
 #include "bbport_heap_sites.h"
 #include "bbport_toggles.h"
+#include "game_profile.h"
 
 #include <array>
 #include <atomic>
@@ -619,6 +620,9 @@ void __attribute__((sysv_abi)) CharaStepHook(u64, const Core::GuestRegisterSnaps
 } // namespace
 
 void InstallEngineFixes() {
+    if (!Game::IsBloodborne109()) {
+        return; // Bloodborne 1.09's offsets: another executable's code is not touched
+    }
     const auto install = [](const char* env, u64 offset, auto code, auto hook) -> const char* {
         if (const char* v = std::getenv(env); v && v[0] == '0') {
             return "off";
@@ -634,6 +638,9 @@ void InstallEngineFixes() {
 }
 
 bool InstallGxQueryGuard() {
+    if (!Game::IsBloodborne109()) {
+        return false;
+    }
     if (const char* env = std::getenv("BB_GX_QUERY_GUARD"); env && env[0] == '0') {
         return false;
     }
@@ -650,6 +657,9 @@ bool InstallGxQueryGuard() {
 }
 
 void Install(RangeCallback on_gpu_range_allocated) {
+    if (!Game::IsBloodborne109()) {
+        return; // the allocator, loader and heap sites are Bloodborne 1.09's
+    }
     static std::atomic<bool> installed{false};
     if (installed.exchange(true)) {
         return;

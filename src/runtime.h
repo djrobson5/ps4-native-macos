@@ -3,6 +3,7 @@
 #include <time.h>
 #include <stdint.h>
 #include <stddef.h>
+#include <string.h>
 #ifndef _WIN32
 #include "platform.h"
 #include <setjmp.h>
@@ -69,9 +70,27 @@ uintptr_t runtime_content_resolve(const char *name);
 void runtime_content_report(void);
 typedef struct { const char *name; void *function; } RuntimeExport;
 #define RUNTIME_LOOKUP(table, nid) runtime_lookup(table, sizeof(table)/sizeof(*(table)), nid)
+/* An import name is NID#library#module; the letters after '#' are the importing executable's own
+ * library and module indices, which differ between games (Bloodborne CUSA03173: libc #q#q,
+ * libkernel #p#J; 13 Sentinels CUSA19610: libc #B#C, libkernel #A#B). A NID is a hash of the
+ * symbol name, so the host matches the NID alone, as bbgpu_resolve does (the approach of the Oct
+ * 20 13S attempt's 08fae58). True when `name` (scoped or a bare NID) is this NID. */
+static inline int runtime_nid_is(const char *name, const char *nid) {
+    const size_t n=strlen(nid);
+    return !strncmp(name,nid,n) && (name[n]=='#' || !name[n]);
+}
 const char *runtime_symbol(const char *nid);
 uintptr_t runtime_lookup(const RuntimeExport *table, size_t count, const char *nid);
 uintptr_t runtime_kernel_resolve(const char *name);
+/* 13 Sentinels (runtime_extra.c, runtime_eventflag.c): switched on by probe.c for that executable;
+ * with it off these tables resolve nothing and Bloodborne's imports resolve as before. */
+void runtime_13s_enable(void);
+int runtime_13s_enabled(void);
+uintptr_t runtime_extra_resolve(const char *name);
+uintptr_t runtime_eventflag_resolve(const char *name);
+void runtime_tsr_set_neo_mode(int on);
+/* Name of the guest thread behind a handle (scePthreadGetname), or NULL. */
+const char *runtime_thread_name_of(void *handle);
 uintptr_t runtime_file_resolve(const char *name);
 uintptr_t runtime_services_resolve(const char *name);
 /* Online play (runtime_net.c, BB_ONLINE=1): the online module answers the network and PSN imports. */

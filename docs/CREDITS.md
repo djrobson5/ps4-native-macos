@@ -144,6 +144,28 @@ encoders ordered by fences, small copies as compute on Metal (runtime PR #12).
 - The launcher's libraries (Tauri, React and others) are credited in
   [bloodborne-launcher](https://github.com/bloodborne-native/bloodborne-launcher).
 
+## 13 Sentinels: Aegis Rim (this branch)
+
+- **saulob's 13 Sentinels PC port** (GPL-2): 335 NID-to-name rows of `src/import_names.inc`, from the
+  import table of its x86-64 port of the same game.
+- Gate 3 (the non-GPU imports), also from saulob's port (GPL-2; each file or block names its source):
+  `src/runtime_eventflag.c` (kernel event flags), `src/runtime_extra.c` (libc.prx start-up hooks, POSIX
+  rwlock names, offline dialog and Http answers, `sceLibcHeapGetTraceInfo`, `sceKernelIsNeoMode`,
+  Coredump and the other console features, from saulob's `runtime_extra.c` and `runtime_tsr.c`),
+  the NpToolkit2 "signed out" answers, Error/Signin dialogs, Msg/SaveData dialog results, DiscMap and
+  safe-area entries in `src/runtime_services.c`, the module, time-zone, mlock and getdents entries of
+  `src/runtime_kernel.c`, `scePthreadCancel`/`scePthreadAttrGetstack` in `src/runtime_thread.c`,
+  `sceKernelAvailableDirectMemorySize` in `src/runtime_memory.c`, `sceSaveDataGetMountInfo`,
+  `sceRtcGet/SetWin32FileTime`, `sceAjmStrError`, the pad light bar, `sceSysmoduleLoadModuleInternalWithArg`,
+  `__progname`; and the libSceVideodec2 library (`gpu/shadps4/core/libraries/videodec/videodec2*.{cpp,h}`,
+  `videodec_error.h`, `CopyNV12DataChecked`: shadPS4's code with saulob's changes, on FFmpeg).
+  saulob's contracts in turn follow Catherine: Full Body PC and MediEvil PC (`runtime_extra.c`).
+- Written here (not from saulob): `(V)PCMPISTRI/M` and `(V)PCMPESTRI/M` in bbcpu's interpreter
+  (`bbcpu/src/cpu/interp_vec.c`, from the Intel SDM; checked against Rosetta 2's SSE4.2),
+  `(V)ADDSUBPD` and the `PMOVZX/PMOVSX` BQ/WQ forms. They are carried as
+  `patches/bbcpu/0001-sse42-string-compare-addsubpd-pmovq.patch`, which `build.sh` applies to the
+  bbcpu submodule.
+
 ## Game patches
 
 By Kyo, Lance McDonald, auser1337, illusion, emoose and other community members

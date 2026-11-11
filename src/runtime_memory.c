@@ -763,6 +763,29 @@ static ABI int32_t batch_map2(BatchEntry *entries, int count, int *processed, in
 static ABI int32_t batch_map(BatchEntry *entries, int count, int *processed) {
     return batch_map2(entries,count,processed,MAP_FIXED_FLAG);
 }
+/* Largest free direct-memory range in [low,high) at the given alignment. Copied from saulob's
+ * 13 Sentinels PC port (github.com/saulob/13-sentinels-aegis-rim-pc/src/runtime_memory.c, GPL-2); bounded by the game's pool, not
+ * the port's extra one. */
+static ABI int32_t direct_available(int64_t low, int64_t high, uint64_t alignment, int64_t *out_start, uint64_t *out_size) {
+    if (!alignment) alignment=PAGE;
+    if (!out_start || !out_size || low<0 || high<=low || !valid_alignment(alignment)) return INVALID;
+    uint64_t end=(uint64_t)high<GAME_POOL_SIZE ? (uint64_t)high : GAME_POOL_SIZE, best=0, best_start=0;
+    read_lock();
+    for (uint64_t at=(uint64_t)low; at<end;) {
+        uint64_t next=end, resume=end;
+        for (int i=0;i<LIMIT;++i) if (blocks[i].used && blocks[i].start+blocks[i].size>at && blocks[i].start<next) {
+            next=blocks[i].start>at ? blocks[i].start : at; resume=blocks[i].start+blocks[i].size;
+        }
+        uint64_t start=align_up(at,alignment);
+        if (next>start && next-start>best) { best=next-start; best_start=start; }
+        if (next==end) break;
+        at=resume>at ? resume : at+PAGE;
+    }
+    read_unlock();
+    if (!best) return NO_SPACE;
+    *out_start=(int64_t)best_start; *out_size=best;
+    return 0;
+}
 static const RuntimeExport exports[]={
     {"sceKernelGetDirectMemorySize",direct_size}, {"sceKernelAllocateDirectMemory",direct_allocate},
     {"sceKernelMapDirectMemory",direct_map}, {"sceKernelMapNamedDirectMemory",direct_map_named},
@@ -772,15 +795,15 @@ static const RuntimeExport exports[]={
     {"sceKernelMprotect",kernel_mprotect}, {"sceKernelQueryMemoryProtection",query_protection},
     {"sceKernelVirtualQuery",virtual_query}, {"sceKernelGetDirectMemoryType",direct_memory_type},
     {"sceKernelBatchMap",batch_map}, {"sceKernelBatchMap2",batch_map2},
-    {"mmap",posix_mmap},
+    {"mmap",posix_mmap}, {"sceKernelAvailableDirectMemorySize",direct_available},
 };
 uintptr_t runtime_memory_resolve(const char *name) {
     /* Direct-memory NIDs are exercised by test_runtime.c before names are loaded. */
-    if (!strcmp(name, "pO96TwzOm5E#p#J")) return (uintptr_t)direct_size;
-    if (!strcmp(name, "rTXw65xmLIA#p#J")) return (uintptr_t)direct_allocate;
-    if (!strcmp(name, "L-Q3LEjIbgA#p#J")) return (uintptr_t)direct_map;
-    if (!strcmp(name, "MBuItvba6z8#p#J")) return (uintptr_t)direct_release;
-    if (!strcmp(name, "cQke9UuBQOk#p#J")) return (uintptr_t)direct_unmap;
+    if (runtime_nid_is(name,"pO96TwzOm5E")) return (uintptr_t)direct_size;
+    if (runtime_nid_is(name,"rTXw65xmLIA")) return (uintptr_t)direct_allocate;
+    if (runtime_nid_is(name,"L-Q3LEjIbgA")) return (uintptr_t)direct_map;
+    if (runtime_nid_is(name,"MBuItvba6z8")) return (uintptr_t)direct_release;
+    if (runtime_nid_is(name,"cQke9UuBQOk")) return (uintptr_t)direct_unmap;
     return RUNTIME_LOOKUP(exports,name);
 }
 /* Host-owned memory the guest can see (image, stacks, trampolines) lives in

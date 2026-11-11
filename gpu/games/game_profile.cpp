@@ -17,7 +17,16 @@ extern const Profile BloodborneProfile;
 namespace {
 constexpr std::array<const Profile*, 1> Profiles = {&BloodborneProfile};
 std::atomic<const Profile*> active{nullptr};
+std::atomic<bool> bloodborne_109{false};
 } // namespace
+
+bool IsBloodborne109() {
+    return bloodborne_109.load(std::memory_order_acquire);
+}
+
+void SetBloodborne109(bool bloodborne) {
+    bloodborne_109.store(bloodborne, std::memory_order_release);
+}
 
 void Select(const char* serial) {
     const char* env = std::getenv("BB_GAME_PROFILE");

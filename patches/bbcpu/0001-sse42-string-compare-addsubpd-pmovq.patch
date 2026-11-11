@@ -1,0 +1,229 @@
+diff --git a/src/cpu/interp_vec.c b/src/cpu/interp_vec.c
+index f789df6..401c95c 100644
+--- a/src/cpu/interp_vec.c
++++ b/src/cpu/interp_vec.c
+@@ -456,11 +456,98 @@ static void move_scalar(BbCpu *cpu, const BbInsn *in, int bytes) {
+     vwrite(cpu, in, dst, &r, 16);
+ }
+ 
++/* ---- SSE4.2 string compare: (V)PCMPISTRI/M and (V)PCMPESTRI/M ----
++ * Written from the Intel SDM's description (comparison, aggregation, polarity, output). A guest C
++ * library's strchr and relatives use them. The first operand is the reg1 string
++ * (xmm1; strchr's needle), the second the reg2 one (xmm2/m128; the text). Result flags: CF = some
++ * bit set, ZF = the second string ends inside the register, SF = the first ends, OF = bit 0;
++ * AF and PF are cleared. */
++static int pcmp_element(const BbVec *v, int i, int words, int is_signed) {
++    if (words) return is_signed ? (int)v->sw[i] : (int)v->w[i];
++    return is_signed ? (int)v->sb[i] : (int)v->b[i];
++}
++static void pcmpstr(BbCpu *cpu, const BbInsn *in, int explicit_length, int mask_form) {
++    const BbOp *o1 = &in->op[0], *o2 = &in->op[1];
++    const int imm = (int)in->op[in->count - 1].disp;
++    const BbVec a = vread(cpu, in, o1), b = vread(cpu, in, o2);
++    const int words = imm & 1, is_signed = (imm >> 1) & 1, agg = (imm >> 2) & 3, polarity = (imm >> 4) & 3;
++    const int n = words ? 8 : 16;
++    int la = n, lb = n;
++    if (explicit_length) {
++        int64_t x = (int32_t)cpu->r[RAX], y = (int32_t)cpu->r[RDX];
++        if (x < 0) x = -x;
++        if (y < 0) y = -y;
++        la = x > n ? n : (int)x; lb = y > n ? n : (int)y;
++    } else {
++        for (la = 0; la < n && pcmp_element(&a, la, words, 0); ++la) {}
++        for (lb = 0; lb < n && pcmp_element(&b, lb, words, 0); ++lb) {}
++    }
++    /* BoolRes[i][j]: first operand element i against second operand element j. */
++    int bool_res[16][16];
++    for (int i = 0; i < n; ++i)
++        for (int j = 0; j < n; ++j) {
++            const int x = pcmp_element(&a, i, words, is_signed), y = pcmp_element(&b, j, words, is_signed);
++            const int valid_i = i < la, valid_j = j < lb;
++            int r;
++            if (agg == 1) { /* ranges: elements pair up as (lower, upper) bounds */
++                r = valid_i && valid_j && ((i & 1) ? y <= x : y >= x);
++            } else if (agg == 0) { /* equal any */
++                r = valid_i && valid_j && x == y;
++            } else if (agg == 2) { /* equal each */
++                r = !valid_i && !valid_j ? 1 : (valid_i && valid_j && x == y);
++            } else { /* equal ordered */
++                r = !valid_i ? 1 : (valid_j && x == y);
++            }
++            bool_res[i][j] = r;
++        }
++    unsigned int_res1 = 0;
++    for (int j = 0; j < n; ++j) {
++        int r = 0;
++        switch (agg) {
++        case 0: for (int i = 0; i < n; ++i) r |= bool_res[i][j]; break;
++        case 1: for (int i = 0; i + 1 < n; i += 2) r |= bool_res[i][j] && bool_res[i + 1][j]; break;
++        case 2: r = bool_res[j][j]; break;
++        default: r = 1; for (int k = 0; k < n - j; ++k) r &= bool_res[k][j + k]; break;
++        }
++        int_res1 |= (unsigned)(r != 0) << j;
++    }
++    const unsigned all = (1u << n) - 1;
++    unsigned int_res2 = int_res1;
++    if (polarity == 1) int_res2 = ~int_res1 & all;
++    else if (polarity == 3) {
++        for (int j = 0; j < lb; ++j) int_res2 ^= 1u << j;
++    }
++    if (mask_form) {
++        BbVec m;
++        memset(&m, 0, sizeof(m));
++        if (imm & 0x40) {
++            for (int j = 0; j < n; ++j)
++                if (int_res2 >> j & 1) { if (words) m.w[j] = 0xffff; else m.b[j] = 0xff; }
++        } else m.q[0] = int_res2;
++        BbVec *x0 = &cpu->v[0];
++        memcpy(x0->b, m.b, 16);
++        if (in->vex) memset(x0->b + 16, 0, 16);
++    } else {
++        int index = n;
++        if (int_res2) {
++            if (imm & 0x40) { index = n - 1; while (!(int_res2 >> index & 1)) --index; }
++            else { index = 0; while (!(int_res2 >> index & 1)) ++index; }
++        }
++        cpu->r[RCX] = (uint32_t)index;
++    }
++    cpu->flags = (cpu->flags & ~(uint64_t)F_ARITH) | (int_res2 ? F_CF : 0) | (lb < n ? F_ZF : 0) |
++                 (la < n ? F_SF : 0) | ((int_res2 & 1) ? F_OF : 0);
++}
++
+ int bbcpu_exec_vec(BbCpu *cpu, const BbInsn *in) {
+     const int m = in->mnemonic;
+     if (is_ibinary(m)) { ibinary(cpu, in); return 1; }
+     if (is_vshift(m)) { vshift(cpu, in); return 1; }
+     switch (m) {
++    case M(PCMPISTRI): case M(VPCMPISTRI): pcmpstr(cpu, in, 0, 0); return 1;
++    case M(PCMPISTRM): case M(VPCMPISTRM): pcmpstr(cpu, in, 0, 1); return 1;
++    case M(PCMPESTRI): case M(VPCMPESTRI): pcmpstr(cpu, in, 1, 0); return 1;
++    case M(PCMPESTRM): case M(VPCMPESTRM): pcmpstr(cpu, in, 1, 1); return 1;
+     /* ---- moves ---- */
+     case M(MOVAPS): case M(MOVUPS): case M(MOVAPD): case M(MOVUPD): case M(MOVDQA): case M(MOVDQU):
+     case M(VMOVAPS): case M(VMOVUPS): case M(VMOVAPD): case M(VMOVUPD): case M(VMOVDQA):
+@@ -697,6 +784,15 @@ int bbcpu_exec_vec(BbCpu *cpu, const BbInsn *in) {
+         vwrite(cpu, in, o.dst, &r, width(in));
+         return 1;
+     }
++    case M(ADDSUBPD): case M(VADDSUBPD): {
++        const Ops o = ops3(in);
++        const BbVec a = vread(cpu, in, o.s1), b = vread(cpu, in, o.s2);
++        BbVec r;
++        memset(&r, 0, sizeof(r));
++        for (int i = 0; i < width(in) / 8; ++i) r.fd[i] = (i & 1) ? a.fd[i] + b.fd[i] : a.fd[i] - b.fd[i];
++        vwrite(cpu, in, o.dst, &r, width(in));
++        return 1;
++    }
+     case M(DPPS): case M(VDPPS): {
+         const Ops o = ops3(in);
+         const BbVec a = vread(cpu, in, o.s1), b = vread(cpu, in, o.s2);
+@@ -992,7 +1088,8 @@ int bbcpu_exec_vec(BbCpu *cpu, const BbInsn *in) {
+     case M(PMOVZXBW): case M(VPMOVZXBW): case M(PMOVZXBD): case M(VPMOVZXBD): case M(PMOVZXWD):
+     case M(VPMOVZXWD): case M(PMOVZXDQ): case M(VPMOVZXDQ): case M(PMOVSXBW): case M(VPMOVSXBW):
+     case M(PMOVSXWD): case M(VPMOVSXWD): case M(PMOVSXDQ): case M(VPMOVSXDQ): case M(PMOVSXBD):
+-    case M(VPMOVSXBD): {
++    case M(VPMOVSXBD): case M(PMOVZXBQ): case M(VPMOVZXBQ): case M(PMOVZXWQ): case M(VPMOVZXWQ):
++    case M(PMOVSXBQ): case M(VPMOVSXBQ): case M(PMOVSXWQ): case M(VPMOVSXWQ): {
+         const BbVec s = vread(cpu, in, &in->op[1]);
+         BbVec r;
+         memset(&r, 0, sizeof(r));
+@@ -1005,6 +1102,10 @@ int bbcpu_exec_vec(BbCpu *cpu, const BbInsn *in) {
+         case M(PMOVSXBW): case M(VPMOVSXBW): for (int i = 0; i < w / 2; ++i) r.sw[i] = s.sb[i]; break;
+         case M(PMOVSXWD): case M(VPMOVSXWD): for (int i = 0; i < w / 4; ++i) r.sd[i] = s.sw[i]; break;
+         case M(PMOVSXDQ): case M(VPMOVSXDQ): for (int i = 0; i < w / 8; ++i) r.sq[i] = s.sd[i]; break;
++        case M(PMOVZXBQ): case M(VPMOVZXBQ): for (int i = 0; i < w / 8; ++i) r.q[i] = s.b[i]; break;
++        case M(PMOVZXWQ): case M(VPMOVZXWQ): for (int i = 0; i < w / 8; ++i) r.q[i] = s.w[i]; break;
++        case M(PMOVSXBQ): case M(VPMOVSXBQ): for (int i = 0; i < w / 8; ++i) r.sq[i] = s.sb[i]; break;
++        case M(PMOVSXWQ): case M(VPMOVSXWQ): for (int i = 0; i < w / 8; ++i) r.sq[i] = s.sw[i]; break;
+         default: for (int i = 0; i < w / 4; ++i) r.sd[i] = s.sb[i]; break;
+         }
+         vwrite(cpu, in, &in->op[0], &r, w);
+diff --git a/tests/jit_guest.c b/tests/jit_guest.c
+index adb4619..70d8f49 100644
+--- a/tests/jit_guest.c
++++ b/tests/jit_guest.c
+@@ -307,10 +307,70 @@ T uint64_t t_convert(uint64_t a, uint64_t b, uint64_t c) {
+     return r * 31 + (uint64_t)_mm_cvttss_si64(_mm_set_ss(f));
+ }
+ 
++/* SSE4.2 string compare (the legacy and, with -mavx, the VEX encodings) and ADDSUBPD, over several
++ * imm8 values (formats, aggregations, polarities, output selection), implicit and explicit
++ * lengths. The strings use a small alphabet with zeros, so matches and ends of strings occur. */
++#define PCMP_ROUND(imm)                                                                           \
++    do {                                                                                          \
++        r = r * 31 + (uint32_t)_mm_cmpistri(va, vb, imm);                                         \
++        r = r * 31 + (uint32_t)_mm_cmpistrc(va, vb, imm) + 2 * (uint32_t)_mm_cmpistrz(va, vb, imm) \
++            + 4 * (uint32_t)_mm_cmpistrs(va, vb, imm) + 8 * (uint32_t)_mm_cmpistro(va, vb, imm);  \
++        r = r * 31 + (uint32_t)_mm_cmpestri(va, la, vb, lb, imm);                                 \
++        r = r * 31 + (uint32_t)_mm_cmpestrc(va, la, vb, lb, imm) + 2 * (uint32_t)_mm_cmpestrz(va, la, vb, lb, imm) \
++            + 4 * (uint32_t)_mm_cmpestrs(va, la, vb, lb, imm) + 8 * (uint32_t)_mm_cmpestro(va, la, vb, lb, imm); \
++        r = r * 31 + (uint64_t)_mm_cvtsi128_si64(_mm_cmpistrm(va, vb, imm));                      \
++        r = r * 31 + (uint64_t)_mm_extract_epi64(_mm_cmpestrm(va, la, vb, lb, imm), 1);          \
++    } while (0)
++T uint64_t t_pcmpstr(uint64_t a, uint64_t b, uint64_t c) {
++    unsigned char sa[16] __attribute__((aligned(16))), sb[16] __attribute__((aligned(16)));
++    const unsigned alphabet = 2 + (unsigned)(c & 3);
++    for (int i = 0; i < 16; ++i) {
++        const unsigned x = (unsigned)((a >> ((i & 7) * 8)) * (unsigned)(i + 3) + (b >> (i & 31))) & 15;
++        const unsigned y = (unsigned)((b >> ((i & 7) * 8)) * (unsigned)(i + 5) + (a >> (i & 31))) & 15;
++        sa[i] = x > alphabet * 2 ? 0 : (unsigned char)(0x41 + x % alphabet + ((c >> 40) & 1 ? 0x80 : 0));
++        sb[i] = y > alphabet * 2 ? 0 : (unsigned char)(0x41 + y % alphabet + ((c >> 40) & 1 ? 0x80 : 0));
++    }
++    if ((c >> 8) & 1) for (int i = (int)((c >> 9) & 15); i < 16; ++i) sa[i] = 0;
++    if ((c >> 13) & 1) for (int i = (int)((c >> 14) & 15); i < 16; ++i) sb[i] = 0;
++    const __m128i va = _mm_load_si128((const __m128i *)sa), vb = _mm_load_si128((const __m128i *)sb);
++    const int la = (int)(int8_t)(c >> 18), lb = (int)(int8_t)(c >> 26);
++    uint64_t r = 0;
++    PCMP_ROUND(0x00); PCMP_ROUND(0x04); PCMP_ROUND(0x08); PCMP_ROUND(0x0c); PCMP_ROUND(0x14);
++    PCMP_ROUND(0x18); PCMP_ROUND(0x1c); PCMP_ROUND(0x28); PCMP_ROUND(0x38); PCMP_ROUND(0x44);
++    PCMP_ROUND(0x46); PCMP_ROUND(0x4a); PCMP_ROUND(0x62); PCMP_ROUND(0x01); PCMP_ROUND(0x05);
++    PCMP_ROUND(0x0d); PCMP_ROUND(0x19); PCMP_ROUND(0x03); PCMP_ROUND(0x0e); PCMP_ROUND(0x4d);
++    union { __m128d v; double d[2]; } x, y, z;
++    x.d[0] = (double)(int64_t)a; x.d[1] = (double)(int32_t)b; y.d[0] = (double)(int32_t)c; y.d[1] = (double)(int64_t)(a ^ c);
++    z.v = _mm_addsub_pd(x.v, y.v);
++    r = r * 31 + (uint64_t)(int64_t)z.d[0] + 3 * (uint64_t)(int64_t)z.d[1];
++    const __m256d w = _mm256_addsub_pd(_mm256_set_pd(x.d[1], x.d[0], y.d[1], y.d[0]), _mm256_set_pd(y.d[0], x.d[1], x.d[0], y.d[1]));
++    union { __m256d v; double d[4]; } u = {w};
++    return r * 31 + (uint64_t)(int64_t)u.d[0] + 3 * (uint64_t)(int64_t)u.d[1] + 5 * (uint64_t)(int64_t)u.d[2] + 7 * (uint64_t)(int64_t)u.d[3];
++}
++
++/* PMOVZX/SX to quadwords (BQ, WQ), register and memory sources, legacy and (with -mavx) VEX. */
++T uint64_t t_pmovq(uint64_t a, uint64_t b, uint64_t c) {
++    uint64_t m[2] = {a ^ (c << 7), b + c};
++    __m128i x = _mm_set_epi64x((long long)b, (long long)a), r1, r2, r3, r4, r5, r6, r7, r8;
++    __asm__ volatile("pmovzxbq %1, %0" : "=x"(r1) : "x"(x));
++    __asm__ volatile("pmovzxwq %1, %0" : "=x"(r2) : "x"(x));
++    __asm__ volatile("pmovsxbq %1, %0" : "=x"(r3) : "x"(x));
++    __asm__ volatile("pmovsxwq %1, %0" : "=x"(r4) : "x"(x));
++    __asm__ volatile("vpmovzxbq %1, %0" : "=x"(r5) : "m"(*(const uint16_t *)m));
++    __asm__ volatile("vpmovzxwq %1, %0" : "=x"(r6) : "m"(*(const uint32_t *)((const char *)m + 3)));
++    __asm__ volatile("vpmovsxbq %1, %0" : "=x"(r7) : "m"(*(const uint16_t *)((const char *)m + 9)));
++    __asm__ volatile("vpmovsxwq %1, %0" : "=x"(r8) : "x"(x));
++    const __m128i all[8] = {r1, r2, r3, r4, r5, r6, r7, r8};
++    uint64_t r = 0;
++    for (int i = 0; i < 8; ++i)
++        r = r * 31 + (uint64_t)_mm_cvtsi128_si64(all[i]) * 7 + (uint64_t)_mm_extract_epi64(all[i], 1);
++    return r;
++}
++
+ typedef uint64_t (*Test)(uint64_t, uint64_t, uint64_t);
+ const struct { const char *name; Test fn; } tests[] = {
+     {"arith", t_arith}, {"compare", t_compare}, {"misc", t_misc}, {"control", t_control},
+-    {"vector", t_vector}, {"float", t_float}, {"string", t_string}, {"memops", t_memops}, {"mxcsr", t_mxcsr}, {"convert", t_convert},
++    {"vector", t_vector}, {"float", t_float}, {"string", t_string}, {"memops", t_memops}, {"mxcsr", t_mxcsr}, {"convert", t_convert}, {"pcmpstr", t_pcmpstr}, {"pmovq", t_pmovq},
+ };
+ 
+ static uint64_t rng = 0x123456789abcdef1ull;
+diff --git a/tools/cpu/test_jit.sh b/tools/cpu/test_jit.sh
+index af761d9..7fa78fc 100755
+--- a/tools/cpu/test_jit.sh
++++ b/tools/cpu/test_jit.sh
+@@ -5,7 +5,7 @@
+ set -euo pipefail
+ cd -- "$(dirname -- "$0")/../.."
+ D=${BB_DEPS:-deps}
+-clang -arch x86_64 -O2 -mavx -msse4.1 -mpopcnt -fno-builtin -fno-stack-protector -Wl,-no_pie -Wl,-no_fixup_chains -Wl,-image_base,0x30000000000 \
++clang -arch x86_64 -O2 -mavx -msse4.2 -mpopcnt -fno-builtin -fno-stack-protector -Wl,-no_pie -Wl,-no_fixup_chains -Wl,-image_base,0x30000000000 \
+     tests/jit_guest.c -o out/jit_guest
+ ROSETTA_ADVERTISE_AVX=1 out/jit_guest > out/jit_guest.expected
+ clang -arch arm64 -O2 -std=gnu11 -I$D/include tests/test_jit.c src/cpu/cpu.c src/cpu/decode.c \

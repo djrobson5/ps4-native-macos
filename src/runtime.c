@@ -317,10 +317,10 @@ static const void *lea_rip_ret_target(uintptr_t code) {
 }
 uintptr_t runtime_resolve_native(const char *name, int is_data, uintptr_t native) {
     static const struct { const char *nid; int slot; } tables[] = {
-        {"sUP1hBaouOw#q#q", 0}, {"1uJgoVq3bQU#q#q", 1}, {"rcQCUr0EaRU#q#q", 2}};
+        {"sUP1hBaouOw", 0}, {"1uJgoVq3bQU", 1}, {"rcQCUr0EaRU", 2}};
     if (is_data || !native || !(capabilities & 1)) return 0;
     for (size_t i = 0; i < sizeof(tables) / sizeof(tables[0]); ++i) {
-        if (strcmp(name, tables[i].nid)) continue;
+        if (!runtime_nid_is(name, tables[i].nid)) continue;
         const void *table = lea_rip_ret_target(native);
         if (!table) return 0;
         ctype_tables[tables[i].slot] = table;
@@ -331,50 +331,56 @@ uintptr_t runtime_resolve_native(const char *name, int is_data, uintptr_t native
 uintptr_t runtime_resolve(const char *name, int is_data) {
     if (!(capabilities & 1)) return 0;
     if (is_data) {
-        if (!strcmp(name, "f7uOxY9mM1U#p#J")) return (uintptr_t)&imported_data->stack_canary;
-        if (!strcmp(name, "ZT4ODD2Ts9o#libSceLibcInternal")) return (uintptr_t)&imported_data->need_libc_internal;
+        if (runtime_nid_is(name,"f7uOxY9mM1U")) return (uintptr_t)&imported_data->stack_canary;
+        if (runtime_nid_is(name,"ZT4ODD2Ts9o")) return (uintptr_t)&imported_data->need_libc_internal;
+        /* __progname (13 Sentinels' libc.prx), a char * to the program name (saulob's runtime.c). */
+        if (runtime_nid_is(name,"djxxOmW6-aw") && runtime_13s_enabled()) {
+            static char **progname;
+            if (!progname) { progname=runtime_low_map(64,PROT_READ|PROT_WRITE); if (!progname) return 0; strcpy((char *)(progname+1),"eboot.bin"); *progname=(char *)(progname+1); }
+            return (uintptr_t)progname;
+        }
         return 0;
     }
-    /* Exact scoped imports for CUSA03173; the suffix identifies library/module. */
-    if (!strcmp(name, "bzQExy189ZI#q#q")) return (uintptr_t)init_env;
-    if (!strcmp(name, "8G2LB+A3rzg#q#q")) return (uintptr_t)guest_atexit;
-    if (!strcmp(name, "tsvEmnenz48#q#q")) return (uintptr_t)guest_cxa_atexit;
-    if (!strcmp(name, "uMei1W9uyNo#q#q")) return (uintptr_t)guest_libc_exit;
+    /* Imports by NID (runtime_nid_is); the suffix is the importing executable's own spelling. */
+    if (runtime_nid_is(name,"bzQExy189ZI")) return (uintptr_t)init_env;
+    if (runtime_nid_is(name,"8G2LB+A3rzg")) return (uintptr_t)guest_atexit;
+    if (runtime_nid_is(name,"tsvEmnenz48")) return (uintptr_t)guest_cxa_atexit;
+    if (runtime_nid_is(name,"uMei1W9uyNo")) return (uintptr_t)guest_libc_exit;
     /* Not imported by the current eboot, exposed for ABI tests/future use. */
-    if (!strcmp(name, "H2e8t5ScQGc#q#q")) return (uintptr_t)guest_finalize;
-    if (!strcmp(name, "3GPpjQdAMTw#q#q")) return (uintptr_t)guard_acquire;
-    if (!strcmp(name, "9rAeANT2tyE#q#q")) return (uintptr_t)guard_release;
-    if (!strcmp(name, "2emaaluWzUw#q#q")) return (uintptr_t)guard_abort;
-    if (!strcmp(name, "Ou3iL1abvng#p#J")) return (uintptr_t)stack_fail;
-    if (!strcmp(name, "8zTFvBIAIN8#q#q")) return (uintptr_t)guest_memset;
-    if (!strcmp(name, "Q3VBxCXhUHs#q#q")) return (uintptr_t)guest_memcpy;
-    if (!strcmp(name, "+P6FRGH4LfA#q#q")) return (uintptr_t)guest_memmove;
-    if (!strcmp(name, "DfivPArhucg#q#q")) return (uintptr_t)guest_memcmp;
-    if (!strcmp(name, "j4ViWNHEgww#q#q")) return (uintptr_t)guest_strlen;
-    if (!strcmp(name, "Ovb2dSJOAuE#q#q")) return (uintptr_t)guest_strcmp;
-    if (!strcmp(name, "aesyjrHVWy4#q#q")) return (uintptr_t)guest_strncmp;
-    if (!strcmp(name, "ob5xAW4ln-0#q#q")) return (uintptr_t)guest_strchr;
-    if (!strcmp(name, "viiwFMaNamA#q#q")) return (uintptr_t)guest_strstr;
-    if (!strcmp(name, "wuAQt-j+p4o#q#q")) return (uintptr_t)guest_exp2f;
-    if (!strcmp(name, "88Vv-AzHVj8#q#q")) return (uintptr_t)guest_fmodf;
-    if (!strcmp(name, "weDug8QD-lE#q#q")) return (uintptr_t)guest_atanf;
-    if (!strcmp(name, "g3ShSirD50I#q#q")) return (uintptr_t)guest_wcsrchr;
-    if (!strcmp(name, "Ezzq78ZgHPs#q#q")) return (uintptr_t)guest_wcschr;
-    if (!strcmp(name, "pNtJdE3x49E#q#q")) return (uintptr_t)guest_wcscmp;
-    if (!strcmp(name, "gfP0im5Z3g0#q#q")) return (uintptr_t)guest_ldiv;
-    if (!strcmp(name, "1D0H2KNjshE#q#q")) return (uintptr_t)guest_powf;
-    if (!strcmp(name, "3+UPM-9E6xY#q#q")) return (uintptr_t)guest_modff;
-    if (!strcmp(name, "8zsu04XNsZ4#q#q")) return (uintptr_t)guest_expf;
-    if (!strcmp(name, "ZE6RNL+eLbk#q#q")) return (uintptr_t)guest_tanf;
-    if (!strcmp(name, "EH-x713A99c#q#q")) return (uintptr_t)guest_atan2f;
-    if (!strcmp(name, "ZtjspkJQ+vw#q#q")) return (uintptr_t)guest_fsin;
-    if (!strcmp(name, "WkkeywLJcgU#q#q")) return (uintptr_t)guest_wcslen;
-    if (!strcmp(name, "QJ5xVfKkni0#q#q")) return (uintptr_t)guest_wmemcmp;
-    if (!strcmp(name, "fL3O02ypZFE#q#q")) return (uintptr_t)guest_wmemcpy;
-    if (!strcmp(name, "Al8MZJh-4hM#q#q")) return (uintptr_t)guest_wmemset;
-    if (!strcmp(name, "vNe1w4diLCs#p#J")) return (uintptr_t)guest_tls_get_addr;
-    if (!strcmp(name, "959qrazPIrg#p#J")) return (uintptr_t)guest_procparam;
-    if (!strcmp(name, "p5EcQeEeJAE#p#J")) return (uintptr_t)guest_set_heap_api;
+    if (runtime_nid_is(name,"H2e8t5ScQGc")) return (uintptr_t)guest_finalize;
+    if (runtime_nid_is(name,"3GPpjQdAMTw")) return (uintptr_t)guard_acquire;
+    if (runtime_nid_is(name,"9rAeANT2tyE")) return (uintptr_t)guard_release;
+    if (runtime_nid_is(name,"2emaaluWzUw")) return (uintptr_t)guard_abort;
+    if (runtime_nid_is(name,"Ou3iL1abvng")) return (uintptr_t)stack_fail;
+    if (runtime_nid_is(name,"8zTFvBIAIN8")) return (uintptr_t)guest_memset;
+    if (runtime_nid_is(name,"Q3VBxCXhUHs")) return (uintptr_t)guest_memcpy;
+    if (runtime_nid_is(name,"+P6FRGH4LfA")) return (uintptr_t)guest_memmove;
+    if (runtime_nid_is(name,"DfivPArhucg")) return (uintptr_t)guest_memcmp;
+    if (runtime_nid_is(name,"j4ViWNHEgww")) return (uintptr_t)guest_strlen;
+    if (runtime_nid_is(name,"Ovb2dSJOAuE")) return (uintptr_t)guest_strcmp;
+    if (runtime_nid_is(name,"aesyjrHVWy4")) return (uintptr_t)guest_strncmp;
+    if (runtime_nid_is(name,"ob5xAW4ln-0")) return (uintptr_t)guest_strchr;
+    if (runtime_nid_is(name,"viiwFMaNamA")) return (uintptr_t)guest_strstr;
+    if (runtime_nid_is(name,"wuAQt-j+p4o")) return (uintptr_t)guest_exp2f;
+    if (runtime_nid_is(name,"88Vv-AzHVj8")) return (uintptr_t)guest_fmodf;
+    if (runtime_nid_is(name,"weDug8QD-lE")) return (uintptr_t)guest_atanf;
+    if (runtime_nid_is(name,"g3ShSirD50I")) return (uintptr_t)guest_wcsrchr;
+    if (runtime_nid_is(name,"Ezzq78ZgHPs")) return (uintptr_t)guest_wcschr;
+    if (runtime_nid_is(name,"pNtJdE3x49E")) return (uintptr_t)guest_wcscmp;
+    if (runtime_nid_is(name,"gfP0im5Z3g0")) return (uintptr_t)guest_ldiv;
+    if (runtime_nid_is(name,"1D0H2KNjshE")) return (uintptr_t)guest_powf;
+    if (runtime_nid_is(name,"3+UPM-9E6xY")) return (uintptr_t)guest_modff;
+    if (runtime_nid_is(name,"8zsu04XNsZ4")) return (uintptr_t)guest_expf;
+    if (runtime_nid_is(name,"ZE6RNL+eLbk")) return (uintptr_t)guest_tanf;
+    if (runtime_nid_is(name,"EH-x713A99c")) return (uintptr_t)guest_atan2f;
+    if (runtime_nid_is(name,"ZtjspkJQ+vw")) return (uintptr_t)guest_fsin;
+    if (runtime_nid_is(name,"WkkeywLJcgU")) return (uintptr_t)guest_wcslen;
+    if (runtime_nid_is(name,"QJ5xVfKkni0")) return (uintptr_t)guest_wmemcmp;
+    if (runtime_nid_is(name,"fL3O02ypZFE")) return (uintptr_t)guest_wmemcpy;
+    if (runtime_nid_is(name,"Al8MZJh-4hM")) return (uintptr_t)guest_wmemset;
+    if (runtime_nid_is(name,"vNe1w4diLCs")) return (uintptr_t)guest_tls_get_addr;
+    if (runtime_nid_is(name,"959qrazPIrg")) return (uintptr_t)guest_procparam;
+    if (runtime_nid_is(name,"p5EcQeEeJAE")) return (uintptr_t)guest_set_heap_api;
     uintptr_t mutex = runtime_mutex_resolve(name);
     if (mutex) return mutex;
     uintptr_t thread = runtime_thread_resolve(name);
@@ -407,15 +413,21 @@ uintptr_t runtime_resolve(const char *name, int is_data) {
     if (save) return save;
     uintptr_t file = runtime_file_resolve(name);
     if (file) return file;
+    if (runtime_13s_enabled()) {
+        uintptr_t extra = runtime_extra_resolve(name);
+        if (extra) return extra;
+        uintptr_t eventflag = runtime_eventflag_resolve(name);
+        if (eventflag) return eventflag;
+    }
     return bbgpu_resolve(name);
 }
 static const struct { const char *nid, *symbol; } import_names[]={
 #include "import_names.inc"
 };
-/* Symbol name for a scoped NID, or NULL when this eboot/libc never imports it. */
+/* Symbol name for a NID (scoped or not), or NULL when it is in none of the tables. */
 const char *runtime_symbol(const char *nid) {
     for (size_t i=0;i<sizeof(import_names)/sizeof(*import_names);++i)
-        if (!strcmp(nid,import_names[i].nid)) return import_names[i].symbol;
+        if (runtime_nid_is(nid,import_names[i].nid)) return import_names[i].symbol;
     return NULL;
 }
 /* Same symbol name means same contract whether imported from libkernel or

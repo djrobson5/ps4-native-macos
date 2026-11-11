@@ -230,7 +230,8 @@ add_library(bbgpu ${BB_GPU_LIBRARY_TYPE} ${VIDEO_CORE} ${RECOMPILER} ${COMMON} $
     shadps4/core/libraries/gnmdriver/gnmdriver.cpp
     shadps4/core/libraries/videoout/driver.cpp shadps4/core/libraries/videoout/video_out.cpp
     shadps4/core/libraries/kernel/equeue.cpp ${AVPLAYER}
-    shadps4/core/libraries/videodec/video_utils.cpp)
+    shadps4/core/libraries/videodec/video_utils.cpp
+    shadps4/core/libraries/videodec/videodec2.cpp shadps4/core/libraries/videodec/videodec2_impl.cpp)
 add_dependencies(bbgpu host_shaders)
 set_target_properties(bbgpu PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${BB_GPU_OUT})
 # The native Metal path may not leave a Vulkan entry point unresolved (runtime/tools/check-link.cmake,

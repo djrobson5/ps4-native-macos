@@ -24,6 +24,7 @@
 #include "bbport_toggles.h"
 #include "bbport_timeline.h"
 #include "bbport_heap_sites.h"
+#include "game_profile.h"
 #include "bbport_gnm_hooks.h"
 #include "video_core/amdgpu/pm4_cmds.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
@@ -152,7 +153,8 @@ static u32 SubmitsAhead() {
 // malloc) are watched; the leak added ~1800 a second, so 100000 over the lowest count seen is
 // taken as one (or the heap asking for more memory). Then the frames stop overlapping.
 static void WatchOverlapLeak() {
-    if (SubmitsAhead() == 0) {
+    // Needs Bloodborne's malloc table (BbHeapSites): another game's frames overlap as set, unwatched.
+    if (SubmitsAhead() == 0 || !Game::IsBloodborne109()) {
         return;
     }
     if (!BbHeapSites::Counting()) {

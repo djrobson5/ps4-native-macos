@@ -2,6 +2,7 @@
 // Adapted from bbport 0.6 (deadinside28/bloodborne_pc, commit 8185b88): draw the game's
 // key-guide icons for the active keyboard, mouse or controller binding.
 #include "bbport_button_prompts.h"
+#include "game_profile.h"
 
 #include <algorithm>
 #include <atomic>
@@ -223,7 +224,8 @@ bool Switch() {
         const char* env = std::getenv("BB_BUTTON_PROMPTS");
         return !(env && env[0] == '0');
     }();
-    return on;
+    // The icons are Bloodborne's (its menu/common.tpf.dcx, known by hash): another game has none.
+    return on && Game::IsBloodborne109();
 }
 
 void WaitTable() {

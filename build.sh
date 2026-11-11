@@ -64,6 +64,22 @@ fi
 if [[ ! -f gpu/third_party/fsr-vulkan/CMakeLists.txt || ! -f gpu/third_party/imgui/imgui.h ]]; then
     git submodule update --init --recursive
 fi
+# The port's changes to bbcpu (patches/bbcpu/) are applied to the submodule's own files, not to a
+# copy: bbcpu's tests (tools/cpu/test_jit.sh) run from inside the submodule and need them too. The
+# submodule stays at its recorded commit and shows as modified. A patch that is already in place is
+# skipped; one that neither applies nor is in place stops the build.
+for patch in "$PWD"/patches/bbcpu/*.patch; do
+    [[ -f $patch ]] || continue
+    if git -C bbcpu apply --reverse --check "$patch" 2>/dev/null; then
+        continue
+    elif git -C bbcpu apply --check "$patch" 2>/dev/null; then
+        git -C bbcpu apply "$patch"
+        echo "Applied ${patch##*/} to bbcpu/"
+    else
+        echo "${patch##*/} does not apply to bbcpu/ (and is not already applied)." >&2
+        exit 1
+    fi
+done
 # BB_PGO: generate (instrumented build that writes pgo/ while the game runs), use, off. Default:
 # use the profile in pgo/ when there is one. The profiles are GCC's, so macOS builds without.
 pgo=${BB_PGO:-}

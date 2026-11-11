@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "bbport_free_check.h"
+#include "game_profile.h"
 
 #include <algorithm>
 #include <array>
@@ -486,7 +487,8 @@ void CheckPage(u64 page, u64 begin, u64 end, u64 value, u64 size, Source source,
 bool Enabled() {
     static const bool enabled = [] {
         const char* env = std::getenv("BB_FREE_CHECK");
-        return env && env[0] == '1';
+        // Walks Bloodborne's 48-byte label pool pages (0xfc0 headers): another game's heap has none.
+        return env && env[0] == '1' && Game::IsBloodborne109();
     }();
     return enabled;
 }

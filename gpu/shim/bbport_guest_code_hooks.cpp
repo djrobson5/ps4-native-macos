@@ -277,11 +277,22 @@ void KeepGuestCodeWritable() {
 }
 
 namespace {
+std::atomic<std::uintptr_t> image_begin{0}, image_end{0};
+
 bool Install(void* address, std::span<const std::uint8_t> expected, std::uint64_t tag, GuestCodeHook hook,
              const std::uint8_t* skip_flag, bool after) {
     auto* code = static_cast<std::uint8_t*>(address);
     if (!hook || expected.size() < NearJumpBytes) {
         return false;
+    }
+    // Before the first byte is read: an offset past the image (another game's executable) would
+    // read whatever lies there, or fault.
+    if (const std::uintptr_t end = image_end.load(std::memory_order_acquire); end) {
+        const auto at = reinterpret_cast<std::uintptr_t>(code);
+        if (at < image_begin.load(std::memory_order_relaxed) || at > end || expected.size() > end - at) {
+            std::fprintf(stderr, "Guest code hook at %p: outside the loaded image (another build?)\n", address);
+            return false;
+        }
     }
     std::scoped_lock lock{hook_mutex};
     if (std::memcmp(code, expected.data(), expected.size()) != 0) {
@@ -353,6 +364,12 @@ bool Install(void* address, std::span<const std::uint8_t> expected, std::uint64_
 }
 
 } // namespace
+
+void SetGuestImage(const void* image, std::uint64_t size) {
+    const auto begin = reinterpret_cast<std::uintptr_t>(image);
+    image_begin.store(begin, std::memory_order_relaxed);
+    image_end.store(image ? begin + size : 0, std::memory_order_release);
+}
 
 bool InstallGuestCodeHook(void* address, std::span<const std::uint8_t> expected, std::uint64_t tag,
                           GuestCodeHook hook, const std::uint8_t* skip_flag) {

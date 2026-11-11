@@ -1758,8 +1758,10 @@ __attribute__((noinline)) int PipelineCache::TranslateForCompile(HwStage hw, SwS
 // keeps moving.
 void PipelineCache::CompileAhead() {
     static bool started = false;
-    // Metal only: the step depends on shaders independent of their draw.
-    if (started || !std::getenv("BB_SHADER_COMPILE") || !device.GetCapabilities().free_colour) {
+    // Metal only: the step depends on shaders independent of their draw. Bloodborne's only: it
+    // scans the game's eboot and its dvdroot_ps4/shader bundles for its engine's programs.
+    if (started || !Game::IsBloodborne109() || !std::getenv("BB_SHADER_COMPILE") ||
+        !device.GetCapabilities().free_colour) {
         return;
     }
     started = true;

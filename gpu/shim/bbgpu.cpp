@@ -6,6 +6,7 @@
 #include "bbport_draw_census.h"
 #include "bbport_render_boundary.h"
 #include "bbport_game_hooks.h"
+#include "bbport_guest_code_hooks.h"
 // bbport: glue between the C loader and the vendored shadPS4 video core.
 #include "bbport_overlay.h"
 #include "bbport_settings.h"
@@ -63,6 +64,7 @@ Frontend::WindowSDL* g_window = nullptr;
 
 namespace Libraries::GnmDriver { void RegisterLib(Core::Loader::SymbolsResolver* sym); }
 namespace Libraries::AvPlayer { void RegisterLib(Core::Loader::SymbolsResolver* sym); }
+namespace Libraries::Videodec2 { void RegisterLib(Core::Loader::SymbolsResolver* sym); }
 namespace Libraries::VideoOut { void RegisterLib(Core::Loader::SymbolsResolver* sym); }
 namespace Libraries::Kernel { void RegisterEventQueue(Core::Loader::SymbolsResolver* sym); }
 
@@ -335,6 +337,8 @@ extern "C" void bbgpu_register_kernel(void) {
     Core::Loader::SymbolsResolver resolver;
     Libraries::Kernel::RegisterEventQueue(&resolver);
     Libraries::AvPlayer::RegisterLib(&resolver);
+    // 13 Sentinels' movies (Bloodborne imports no libSceVideodec2; nothing resolves to these there).
+    Libraries::Videodec2::RegisterLib(&resolver);
 }
 
 extern "C" uintptr_t bbgpu_resolve(const char* scoped_nid) {
@@ -378,7 +382,23 @@ extern "C" int bbgpu_camera_look(float yaw, float pitch) {
     return BbGameHooks::CameraLookAdd(pitch, yaw) ? 1 : 0;
 }
 
+extern "C" void bbgpu_set_guest_image(const unsigned char* image, uint64_t size) {
+    Core::SetGuestImage(image, size);
+}
+
+extern "C" void bbgpu_set_game(int bloodborne_1_09) {
+    Game::SetBloodborne109(bloodborne_1_09 != 0);
+}
+
 extern "C" void bbgpu_patch_image(unsigned char* image, uint64_t size) {
+    // Every hook below is written for one build of the Bloodborne executable: its offsets lie past
+    // another game's image. Not installed unless the loader declared Bloodborne (bbgpu_set_game);
+    // the installer also refuses an address outside the image.
+    if (!Game::IsBloodborne109()) {
+        std::printf("Guest hooks: not installed (the executable is not Bloodborne 1.09's)\n");
+        return;
+    }
+    Core::SetGuestImage(image, size);
     BbGnmHooks::PatchImage(image, size);
     BbGameMenu::PatchImage(image, size);
     BbFrameRate::PatchImage(image, size);

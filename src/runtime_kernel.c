@@ -182,8 +182,9 @@ static ABI void raise_exception(uint32_t code,uint64_t argument) {
      * after the check goes on with the value, so a retail build just continued: logged, and the
      * game goes on. BB_GAME_ASSERT_STOP=1 stops as before. Ported from bbport 0.6
      * (deadinside28/bloodborne_pc 8185b88, issue #207); under bbcpu the site is the import's
-     * guest return address instead of a host stack scan. */
-    {
+     * guest return address instead of a host stack scan. Bloodborne 1.09's offsets: not for 13
+     * Sentinels, whose code lies at the same offsets. */
+    if (!runtime_13s_enabled()) {
         const uint64_t base=BB_IMAGE_BASE, hi=base+0x50d96dcull;
         uint64_t at=0;
         if (bbcpu_enabled()) {
@@ -323,6 +324,46 @@ static ABI int32_t posix_key_create(uint32_t *k,KeyDestructor d) { int32_t r=key
 static ABI int32_t posix_key_delete(uint32_t k) { int32_t r=key_delete(k); return r ? r&0xffff : 0; }
 static ABI int32_t posix_key_set(uint32_t k,void *v) { int32_t r=key_set(k,v); return r ? r&0xffff : 0; }
 
+/* 13 Sentinels additions, copied from saulob's 13 Sentinels PC port (github.com/saulob/13-sentinels-aegis-rim-pc/src/runtime_kernel.c,
+ * GPL-2): module queries the runtime has no records for, time zone conversion, mlock, getdents and
+ * the libc unwinder's hooks. Bloodborne does not import them. */
+static ABI int32_t module_info_from_addr(uint64_t address,int32_t flags,void *info) {
+    (void)address;
+    if (flags>=3) return ERR(22);
+    if (!info) return ERR(14);
+    return ERR(3); /* ESRCH: the runtime keeps no module records */
+}
+static ABI int32_t module_info_for_unwind(uint64_t address,int32_t flags,void *info) {
+    return module_info_from_addr(address,flags,info);
+}
+static ABI int32_t kernel_mlock(const void *address,uint64_t size) { (void)address; (void)size; return 0; }
+/* libc's C++ exception unwinder. The game does not throw (no __cxa_throw import): unwinding
+ * finds no frame data. */
+static ABI int32_t elf_phdr_match_addr(void *info,uint64_t address) { (void)info; (void)address; return 0; }
+static ABI int32_t is_signal_return(uint64_t pc) { (void)pc; return 0; }
+static ABI void pthread_cxa_finalize(void *dso) { (void)dso; }
+/* Local time = UTC - minuteswest * 60. `unused` is the legacy second argument of the SDK function. */
+static ABI int32_t kernel_convert_local_to_utc(int64_t local,int64_t unused,int64_t *utc,GuestTimezone *tz,int32_t *dst_seconds) {
+    (void)unused;
+    if (!tz) return ERR(22);
+    if (utc) *utc=local-((int64_t)tz->minuteswest+tz->dsttime)*60;
+    if (dst_seconds) *dst_seconds=tz->dsttime*60;
+    return 0;
+}
+typedef struct { int64_t t; uint32_t west_sec, dst_sec; } GuestTimesec;
+static ABI int32_t kernel_convert_utc_to_local(int64_t utc,int64_t *local,GuestTimesec *ts,uint64_t *dst_seconds) {
+    GuestTimezone tz;
+    kernel_gettimezone(&tz);
+    if (local) *local=utc-(int64_t)tz.minuteswest*60;
+    if (ts) { ts->t=utc; ts->west_sec=(uint32_t)(tz.minuteswest*60); ts->dst_sec=0; }
+    if (dst_seconds) *dst_seconds=0;
+    return 0;
+}
+static ABI int32_t kernel_getdents(int fd, char *buffer, uint64_t size) {
+    int64_t r=runtime_file_getdents(fd,buffer,size,NULL);
+    return r<0 ? ERR((int)-r) : (int32_t)r;
+}
+
 static const RuntimeExport exports[]={
     {"sceKernelClockGettime",kernel_clock_gettime}, {"clock_gettime",posix_clock_gettime},
     {"clock_getres",posix_clock_getres},
@@ -347,6 +388,13 @@ static const RuntimeExport exports[]={
     {"scePthreadSetspecific",key_set}, {"scePthreadGetspecific",key_get},
     {"pthread_key_create",posix_key_create}, {"pthread_key_delete",posix_key_delete},
     {"pthread_setspecific",posix_key_set}, {"pthread_getspecific",key_get},
+    {"sceKernelGetModuleInfoFromAddr",module_info_from_addr},
+    {"sceKernelGetModuleInfoForUnwind",module_info_for_unwind}, {"sceKernelMlock",kernel_mlock},
+    {"sceKernelConvertLocaltimeToUtc",kernel_convert_local_to_utc},
+    {"sceKernelConvertUtcToLocaltime",kernel_convert_utc_to_local},
+    {"sceKernelGetdents",kernel_getdents},
+    {"__elf_phdr_match_addr",elf_phdr_match_addr}, {"_is_signal_return",is_signal_return},
+    {"__pthread_cxa_finalize",pthread_cxa_finalize},
 };
 uintptr_t runtime_kernel_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
 #else

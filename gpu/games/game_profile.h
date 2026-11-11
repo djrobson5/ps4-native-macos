@@ -45,6 +45,16 @@ void Select(const char* serial);
 /// The active profile, or nullptr (an unknown game, or BB_GAME_PROFILE=none).
 const Profile* Active();
 
+/// Whether the guest executable is Bloodborne 1.09's (bbgpu_set_game; false until the loader says
+/// so, and for any other game's executable, 13 Sentinels' included). Everything that reads or
+/// writes the guest image, its libc.prx or the game's data structures at a fixed Bloodborne
+/// address or layout (the engine hooks, the game menu, the frame rate hooks, the heap leak watcher,
+/// the button prompt icons read from the game's files, the trophy notices, the ahead-of-time shader
+/// compile) runs only while this is true. Independent of the profile above, which is chosen by the
+/// title's serial and which BB_GAME_PROFILE=none can switch off for comparisons.
+bool IsBloodborne109();
+void SetBloodborne109(bool bloodborne);
+
 /// The active profile's buffer copy shader, or 0.
 inline std::uint64_t BufferCopyShader() {
     const Profile* profile = Active();

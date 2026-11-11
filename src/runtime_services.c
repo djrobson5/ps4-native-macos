@@ -3,7 +3,11 @@
  *   - network cable unplugged: NetCtl disconnected, sockets unavailable;
  *   - common dialogs complete immediately (no UI is drawn yet);
  *   - the whole package is installed (PlayGo reports every chunk local).
- * Every entry here is an explicit contract; unknown functions still stop. */
+ * Every entry here is an explicit contract; unknown functions still stop.
+ *
+ * 13 Sentinels additions (the NpToolkit2 signed-out answers, Error/Signin dialogs, Msg/SaveData
+ * dialog results, DiscMap, safe area) are copied from saulob's 13 Sentinels PC port
+ * (github.com/saulob/13-sentinels-aegis-rim-pc/src/runtime_services.c, GPL-2), adapted: no player slots, no on-screen save list. */
 #define _GNU_SOURCE
 #include "runtime.h"
 #include "gpu/bbgpu.h"
@@ -90,6 +94,7 @@ static ABI int32_t system_status(unsigned char *status) {
 static ABI int32_t system_event(void *event) { (void)event; return SYSTEM_NO_EVENT; }
 static ABI int32_t hide_splash(void) { note("SystemService: splash screen hidden"); return 0; }
 static ABI int32_t launch_browser(void) { note("SystemService: web browser request ignored (offline)"); return 0; }
+static ABI int32_t safe_area(float *info) { if (!info) return SYSTEM_PARAMETER; *info=1.0f; return 0; } /* full screen */
 
 /* ---- NetCtl / Net / Http / Ssl: no network ---- */
 static int32_t net_errno;
@@ -170,11 +175,19 @@ static ABI int32_t voice_info(uint32_t port,uint32_t *info) {
 }
 
 /* ---- Common dialogs: nothing is displayed; an opened dialog finishes. ---- */
-typedef struct { const char *name; int initialized, status; } Dialog;
-static Dialog dialogs[]={{"CommonDialog",0,0},{"MsgDialog",0,0},{"SaveDataDialog",0,0},
-                         {"NpProfileDialog",0,0},{"NpCommerceDialog",0,0},{"ImeDialog",0,0}};
+typedef struct { const char *name; int initialized, status; uint32_t button; } Dialog;
+static Dialog dialogs[]={{"CommonDialog",0,0,0},{"MsgDialog",0,0,0},{"SaveDataDialog",0,0,0},
+                         {"NpProfileDialog",0,0,0},{"NpCommerceDialog",0,0,0},{"ImeDialog",0,0,0},{"ErrorDialog",0,0,0}};
+#define DIALOG_RUNNING 2
+#define DIALOG_FINISHED 3
+#define DIALOG_NOT_FINISHED ((int32_t)0x80B80005)
+#define DIALOG_ARG_NULL ((int32_t)0x80B8000D)
 static int common_initialized;
 static ABI int32_t common_init(void) { common_initialized=1; return 0; }
+static ABI int32_t common_is_used(void) {
+    for (size_t i=0;i<sizeof(dialogs)/sizeof(*dialogs);++i) if (dialogs[i].status==DIALOG_RUNNING) return 1;
+    return 0;
+}
 static int32_t dialog_init(int i) {
     if (dialogs[i].initialized) return (int32_t)0x80B80004;
     dialogs[i].initialized=1; dialogs[i].status=1; return 0;
@@ -182,7 +195,7 @@ static int32_t dialog_init(int i) {
 static int32_t dialog_open(int i) {
     if (!dialogs[i].initialized) return DIALOG_NOT_INITIALIZED;
     printf("Runtime: %s opened; completed immediately (no dialog UI yet)\n",dialogs[i].name);
-    dialogs[i].status=3; return 0;
+    dialogs[i].status=DIALOG_FINISHED; dialogs[i].button=1; return 0; /* OK / YES */
 }
 static int32_t dialog_status(int i) { return dialogs[i].status; }
 static int32_t dialog_term(int i) {
@@ -194,7 +207,63 @@ static int32_t dialog_term(int i) {
     static ABI int32_t tag##_open(const void *p) { (void)p; return dialog_open(i); } \
     static ABI int32_t tag##_status(void) { return dialog_status(i); } \
     static ABI int32_t tag##_term(void) { return dialog_term(i); }
-DIALOG(msg,1) DIALOG(save,2) DIALOG(profile,3) DIALOG(commerce,4)
+DIALOG(msg,1) DIALOG(profile,3) DIALOG(commerce,4)
+static ABI int32_t error_init(void) { return dialog_init(6); }
+static ABI int32_t error_status(void) { return dialog_status(6); }
+static ABI int32_t error_term(void) { return dialog_term(6); }
+static ABI int32_t error_open(const int32_t *param) {
+    if (param) printf("Runtime: error dialog, code 0x%08x\n",(unsigned)param[1]);
+    return dialog_open(6);
+}
+/* Result: result (OK), button, reserved; SaveDataDialog's begins with the mode. */
+static int32_t dialog_result(int i, unsigned char *out, size_t offset) {
+    if (dialogs[i].status!=DIALOG_FINISHED) return DIALOG_NOT_FINISHED;
+    if (!out) return DIALOG_ARG_NULL;
+    uint32_t values[2]={0,dialogs[i].button};
+    memcpy(out+offset,values,8);
+    return 0;
+}
+static ABI int32_t msg_result(unsigned char *out) { return dialog_result(1,out,0); }
+/* SaveDataDialog. OrbisSaveDataDialogParam: BaseParam (48), size, mode @52, dispType @56,
+ * animParam @64, items @72, ..., userData @112. SaveDialogItems: dirName @16 (32-byte names),
+ * dirNameNum @24, newItem @32. The port has no save list to show yet: a load or save answers for
+ * the first listed save (the new item when there is none), a delete is cancelled. The result
+ * names it ("" = the new item). OrbisSaveDataDialogResult: mode, result, buttonId, dirName* @16,
+ * param* @24, userData @32. */
+#define SAVE_MODE_LIST 1
+#define SAVE_RESULT_CANCELED 1
+static struct { uint32_t mode, result; void *user_data; char dir[32]; } save_dialog;
+static ABI int32_t save_init(void) { return dialog_init(2); }
+static ABI int32_t save_open(const unsigned char *p) {
+    if (!runtime_13s_enabled()) return dialog_open(2); /* Bloodborne: as before, the parameter is not read */
+    if (!p) return DIALOG_ARG_NULL;
+    if (!dialogs[2].initialized) return DIALOG_NOT_INITIALIZED;
+    memset(&save_dialog,0,sizeof(save_dialog));
+    memcpy(&save_dialog.mode,p+52,4);
+    memcpy(&save_dialog.user_data,p+112,8);
+    const unsigned char *items; memcpy(&items,p+72,8);
+    if (items) {
+        const char *dirs; uint32_t count;
+        memcpy(&dirs,items+16,8); memcpy(&count,items+24,4);
+        if (dirs && count && dirs[0]) memcpy(save_dialog.dir,dirs,31);
+    }
+    uint32_t type; memcpy(&type,p+56,4);
+    const int status=dialog_open(2);
+    if (save_dialog.mode==SAVE_MODE_LIST && type==3) { save_dialog.result=SAVE_RESULT_CANCELED; dialogs[2].button=0; }
+    return status;
+}
+static ABI int32_t save_status(void) { return dialog_status(2); }
+static ABI int32_t save_term(void) { return dialog_term(2); }
+static ABI int32_t save_result(unsigned char *out) {
+    int32_t r=dialog_result(2,out,4);
+    if (r) return r;
+    memcpy(out,&save_dialog.mode,4);
+    memcpy(out+4,&save_dialog.result,4);
+    char *dir; memcpy(&dir,out+16,8);
+    if (dir) { memset(dir,0,32); if (!save_dialog.result) memcpy(dir,save_dialog.dir,31); }
+    memcpy(out+32,&save_dialog.user_data,8);
+    return 0;
+}
 static ABI int32_t profile_result(void *result) { if (result) memset(result,0,4); return 0; }
 /* ImeDialog: text typed on the keyboard into the game window (title bar shows it).
  * OrbisImeDialogParam: user, type, languages(8), enter label, method, filter,
@@ -289,6 +358,15 @@ static ABI int32_t trophy_info(int32_t ctx,int32_t handle,int32_t id,void *detai
     (void)id; return trophy_game_info(ctx,handle,details,data);
 }
 
+/* 13 Sentinels (NpToolkit2): the unlock flags of a title this port keeps no trophy archive for are
+ * all clear, and handles and contexts need no teardown. */
+static ABI int32_t trophy_unlock_state(int32_t ctx,int32_t handle,uint32_t *flags,uint32_t *count) {
+    (void)ctx; (void)handle;
+    if (!flags || !count) return TROPHY_INVALID;
+    memset(flags,0,16); *count=0;
+    return 0;
+}
+
 /* ---- PlayGo: fully installed package ---- */
 static int playgo_handle, playgo_chunks=-1;
 static ABI int32_t playgo_init(const void *params) {
@@ -349,6 +427,15 @@ static ABI int32_t mouse_read(int32_t handle,unsigned char *data,int32_t count) 
 static ABI int32_t mouse_close(int32_t handle) { (void)handle; return 0; }
 static ABI int32_t audio_in_open(void) { return AUDIO_IN_NOT_OPENED; }
 
+
+/* sceDiscMap 0x7C980FFB0AA27E7A (libSceFios2, same arguments): no disc bitmap, nothing pending. */
+static ABI int32_t discmap_7c98(const char *path,int64_t offset,int64_t size,int32_t *flags,int32_t *r1,int32_t *r2) {
+    (void)path; (void)offset; (void)size;
+    if (flags) *flags=0;
+    if (r1) *r1=0;
+    if (r2) *r2=0;
+    return ORBIS_OK;
+}
 
 static const RuntimeExport exports[]={
     {"sceUserServiceInitialize",user_initialize}, {"sceUserServiceTerminate",user_terminate},
@@ -443,7 +530,54 @@ static const RuntimeExport exports[]={
     {"sceNpMatching2CreateContext",np_signed_out},
     {"sceNpSignalingInitialize",ok_void}, {"sceNpSignalingTerminate",ok_void},
     {"sceNpSignalingCreateContext",np_signed_out},
-    {"sceCommonDialogInitialize",common_init},
+    /* NpToolkit2 (linked from the game's sce_module) and the A/AccountId variants: signed out. */
+    {"sceNetCtlRegisterCallbackForNpToolkit",netctl_register}, {"sceNetCtlCheckCallbackForNpToolkit",netctl_check},
+    {"sceNetCtlUnregisterCallbackForNpToolkit",netctl_unregister},
+    {"sceNpRegisterStateCallbackForToolkit",np_register}, {"sceNpUnregisterStateCallbackForToolkit",ok_void},
+    {"sceNpCheckCallbackForLib",ok_void},
+    {"sceUserServiceRegisterEventCallback",ok_void}, {"sceUserServiceUnregisterEventCallback",ok_void},
+    {"sceNpCreateRequest",np_request}, {"sceNpCheckNpAvailabilityA",np_signed_out},
+    {"sceNpGetAccountIdA",np_signed_out}, {"sceNpGetParentalControlInfoA",np_signed_out},
+    {"sceNpGetUserIdByAccountId",np_signed_out},
+    {"sceNpInGameMessageInitialize",lib_init_id}, {"sceNpInGameMessageTerminate",ok_void},
+    {"sceNpInGameMessageCreateHandle",np_request_ctx}, {"sceNpInGameMessageDeleteHandle",ok_void},
+    {"sceNpInGameMessagePrepareA",np_signed_out}, {"sceNpInGameMessageSendDataA",np_signed_out},
+    {"sceNpAuthCreateRequest",np_request}, {"sceNpAuthAbortRequest",ok_void},
+    {"sceNpAuthGetAuthorizationCodeA",np_signed_out}, {"sceNpAuthGetIdTokenA",np_signed_out},
+    {"sceNpTusCreateNpTitleCtxA",np_request_ctx}, {"sceNpTssCreateNpTitleCtxA",np_request_ctx},
+    {"sceNpTusDeleteNpTitleCtx",ok_void}, {"sceNpTusCreateRequest",np_request}, {"sceNpTusDeleteRequest",ok_void},
+    {"sceNpTusAbortRequest",ok_void}, {"sceNpTusPollAsync",np_poll},
+    {"sceNpTusGetDataAAsync",np_signed_out}, {"sceNpTusSetDataAAsync",np_signed_out},
+    {"sceNpTusSetDataA",np_signed_out}, {"sceNpTusGetDataForCrossSave",np_signed_out},
+    {"sceNpTusGetMultiSlotDataStatusAAsync",np_signed_out}, {"sceNpTusDeleteMultiSlotDataAAsync",np_signed_out},
+    {"sceNpTssGetDataAsync",np_signed_out}, {"sceNpTssGetData",np_signed_out},
+    {"sceNpScoreCreateNpTitleCtxA",np_request_ctx}, {"sceNpScorePollAsync",np_poll},
+    {"sceNpScoreRecordScoreAsync",np_signed_out}, {"sceNpScoreGetRankingByAccountIdAsync",np_signed_out},
+    {"sceNpScoreGetRankingByAccountId",np_signed_out}, {"sceNpScoreGetFriendsRankingA",np_signed_out},
+    {"sceNpWordFilterCreateTitleCtxA",np_request_ctx}, {"sceNpWordFilterDeleteTitleCtx",ok_void},
+    {"sceNpWordFilterCreateRequest",np_request}, {"sceNpWordFilterDeleteRequest",ok_void},
+    {"sceNpWordFilterAbortRequest",ok_void}, {"sceNpWordFilterSanitizeComment",np_signed_out},
+    {"sceNpBandwidthTestInitStart",np_signed_out}, {"sceNpBandwidthTestShutdown",ok_void},
+    {"sceNpBandwidthTestAbort",ok_void},
+    {"sceNpMatching2CreateContextA",np_signed_out},
+    {"sceNpWebApiCreateContextA",np_signed_out}, {"sceNpWebApiCreateHandle",np_request},
+    {"sceNpWebApiDeleteHandle",ok_void},
+    {"sceNpWebApiCheckTimeout",ok_void}, {"sceNpWebApiSetRequestTimeout",ok_void},
+    {"sceNpWebApiAddHttpRequestHeader",ok_void}, {"sceNpWebApiSendRequest2",np_signed_out},
+    {"sceNpWebApiCreateExtdPushEventFilter",np_signed_out}, {"sceNpWebApiDeleteExtdPushEventFilter",ok_void},
+    {"sceNpSnsFacebookCreateRequest",np_request}, {"sceNpSnsFacebookDeleteRequest",ok_void},
+    {"sceNpSnsFacebookGetAccessToken",np_signed_out},
+    {"sceSigninDialogInitialize",ok_void}, {"sceSigninDialogTerminate",ok_void},
+    {"sceNpSnsFacebookDialogInitialize",ok_void}, {"sceNpSnsFacebookDialogTerminate",ok_void},
+    {"sceCommonDialogInitialize",common_init}, {"sceCommonDialogIsUsed",common_is_used},
+    {"sceMsgDialogGetResult",msg_result}, {"sceMsgDialogGetStatus",msg_status},
+    {"sceSaveDataDialogGetStatus",save_status}, {"sceSaveDataDialogGetResult",save_result},
+    {"sceErrorDialogInitialize",error_init}, {"sceErrorDialogOpen",error_open},
+    {"sceErrorDialogGetStatus",error_status}, {"sceErrorDialogUpdateStatus",error_status},
+    {"sceErrorDialogTerminate",error_term},
+    {"sceNpTrophyGetTrophyUnlockState",trophy_unlock_state}, {"sceNpTrophyAbortHandle",ok_void},
+    {"sceNpTrophyDestroyHandle",ok_void}, {"sceNpTrophyDestroyContext",ok_void},
+    {"sceSystemServiceGetDisplaySafeAreaInfo",safe_area}, {"sceDiscMap_7C980FFB0AA27E7A",discmap_7c98},
     {"sceMsgDialogInitialize",msg_init}, {"sceMsgDialogOpen",msg_open},
     {"sceMsgDialogUpdateStatus",msg_status}, {"sceMsgDialogTerminate",msg_term},
     {"sceSaveDataDialogInitialize",save_init}, {"sceSaveDataDialogOpen",save_open},

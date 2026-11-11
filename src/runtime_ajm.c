@@ -479,6 +479,20 @@ static ABI int32_t ajm_batch_cancel(uint32_t id, uint32_t batch) {
 static ABI int32_t ajm_error_dump(void) { return 0; }
 static ABI int32_t ajm_memory_register(uint32_t id, void *p, uint64_t pages) { (void)p; (void)pages; return context(id) ? 0 : ERR_INVALID_CONTEXT; }
 
+/* sceAjmStrError (github.com/saulob/13-sentinels-aegis-rim-pc/src/runtime_ajm.c, GPL-2). */
+static ABI const char *ajm_str_error(int32_t code) {
+    switch (code) {
+    case ERR_INVALID_CONTEXT: return "SCE_AJM_ERROR_INVALID_CONTEXT";
+    case ERR_INVALID_INSTANCE: return "SCE_AJM_ERROR_INVALID_INSTANCE";
+    case ERR_INVALID_BATCH: return "SCE_AJM_ERROR_INVALID_BATCH";
+    case ERR_INVALID_PARAMETER: return "SCE_AJM_ERROR_INVALID_PARAMETER";
+    case ERR_OUT_OF_RESOURCES: return "SCE_AJM_ERROR_OUT_OF_RESOURCES";
+    case ERR_NOT_REGISTERED: return "SCE_AJM_ERROR_CODEC_NOT_REGISTERED";
+    case ERR_MALFORMED_BATCH: return "SCE_AJM_ERROR_MALFORMED_BATCH";
+    case ERR_CANCELLED: return "SCE_AJM_ERROR_CANCELLED";
+    default: return "SCE_AJM_ERROR_UNKNOWN";
+    }
+}
 static const RuntimeExport exports[]={
     {"sceAjmInitialize",ajm_initialize}, {"sceAjmFinalize",ajm_finalize},
     {"sceAjmModuleRegister",ajm_module_register}, {"sceAjmModuleUnregister",ajm_module_unregister},
@@ -487,7 +501,7 @@ static const RuntimeExport exports[]={
     {"sceAjmBatchJobControlBufferRa",job_control}, {"sceAjmBatchJobRunBufferRa",job_run},
     {"sceAjmBatchJobRunSplitBufferRa",job_run_split}, {"sceAjmBatchJobInlineBuffer",job_inline},
     {"sceAjmBatchStartBuffer",ajm_batch_start}, {"sceAjmBatchWait",ajm_batch_wait},
-    {"sceAjmBatchCancel",ajm_batch_cancel}, {"sceAjmBatchErrorDump",ajm_error_dump},
+    {"sceAjmBatchCancel",ajm_batch_cancel}, {"sceAjmBatchErrorDump",ajm_error_dump}, {"sceAjmStrError",ajm_str_error},
     {"sceAjmMemoryRegister",ajm_memory_register},
 };
 uintptr_t runtime_ajm_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }

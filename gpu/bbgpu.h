@@ -74,7 +74,18 @@ float bbgpu_frame_aspect(void);
 int bbgpu_camera_look(float yaw, float pitch);
 /* 1 while the free camera (the community patch) is on: the mouse drives it through the right stick. */
 int bbgpu_free_camera(void);
-/* Patches the loaded image before the game runs (image still writable): libGnm entry hooks. */
+/* Declares which game's executable this is: nonzero for Bloodborne 1.09, zero for any other (13
+ * Sentinels). Zero until called. Everything in the GPU library that reads or writes the guest
+ * image, its libc or the game's data at fixed Bloodborne addresses or layouts (bbgpu_patch_image,
+ * the heap leak watcher, the button prompt icons, the trophy notices, the ahead-of-time shader
+ * compile, the diagnostics that walk Bloodborne's structures) runs only when it is nonzero. Call it
+ * before bbgpu_init. */
+void bbgpu_set_game(int bloodborne_1_09);
+/* The loaded executable image (any game's): the guest code hook installer refuses addresses outside it
+ * before reading them. Called for every image, also when bbgpu_patch_image is not. */
+void bbgpu_set_guest_image(const unsigned char *image, uint64_t size);
+/* Patches the loaded image before the game runs (image still writable): libGnm entry hooks. Bloodborne 1.09's only:
+ * its offsets lie past other executables. Does nothing unless bbgpu_set_game(1) was called. */
 void bbgpu_patch_image(unsigned char *image, uint64_t size);
 /* Number of symbols registered by the vendored libraries (diagnostics). */
 unsigned bbgpu_symbol_count(void);

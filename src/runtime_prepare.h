@@ -26,10 +26,17 @@ typedef struct {
      * resolve natively, the executable's process parameters and TLS. */
     int linked;
     uint64_t procparam, main_tls[4]; /* main_tls: vaddr, filesz, memsz, align */
-    struct BbBootModule { uint64_t base, size, init, tls_address, tls_memsz, tls_filesz, tls_module; } *modules;
+    struct BbBootModule { uint64_t base, size, init, tls_address, tls_memsz, tls_filesz, tls_module; const char *file; } *modules;
     size_t module_count;
     struct BbBootBinding { uint64_t index, address, kind; } *bindings;
     size_t binding_count;
+    /* After bb_boot_link: the library each import comes from (names[i]'s library, "" if unknown),
+     * for diagnostics (BB_LIST_UNRESOLVED, the STOP message). The caller may take it (and clear the
+     * pointer) before bb_boot_free. */
+    char (*libraries)[40];
+    /* 13 Sentinels (CUSA19610 1.00): the executable is one of the known non-Bloodborne images, so
+     * the Bloodborne 1.09 addresses (hooks, guards) must stay untouched. */
+    int not_bloodborne;
 } BbBoot;
 
 /* Reads GAME_DIR/eboot.bin (a plaintext SELF or ELF) and sce_module/libc.prx. 0 on success; else
@@ -37,7 +44,8 @@ typedef struct {
  * unless BB_SKIP_GAME_CHECK=1. */
 int bb_boot_prepare(const char *game_dir, BbBoot *boot, char *error, size_t error_size);
 /* Links GAME_DIR/sce_module's libc.prx and libSceFios2.prx after the executable, as
- * scripts/link_modules.py does: boot-linked.bin's contents. 0 on success. */
+ * scripts/link_modules.py does: boot-linked.bin's contents (and libSceNpToolkit2.prx third when
+ * the executable imports it, as 13 Sentinels does). 0 on success. */
 int bb_boot_link(const char *game_dir, BbBoot *boot, char *error, size_t error_size);
 /* boot.bin (BBPROBE2) as scripts/prepare.py writes it, or boot-linked.bin (BBPROBE5) as
  * scripts/link_modules.py writes it once linked. 0 on success. */

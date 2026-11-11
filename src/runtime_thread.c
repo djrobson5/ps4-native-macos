@@ -113,6 +113,8 @@ void runtime_thread_attach_main(void) {
 }
 /* The guest name of this thread ("" before it ran guest code). */
 const char *runtime_thread_name(void) { return current ? current->name : ""; }
+/* The guest name of the thread behind a handle, or NULL (scePthreadGetname). */
+const char *runtime_thread_name_of(void *handle);
 static GuestThread *find_thread(void *handle) {
     GuestThread *found=NULL;
     pthread_mutex_lock(&lock);
@@ -127,6 +129,11 @@ static ThreadAttr *find_attr(ThreadAttr **slot) {
     for (ThreadAttr *a=attributes;a;a=a->next) if (a==*slot && a->magic==ATTR_MAGIC) { found=a; break; }
     pthread_mutex_unlock(&lock);
     return found;
+}
+
+const char *runtime_thread_name_of(void *handle) {
+    GuestThread *t=find_thread(handle);
+    return t ? t->name : NULL;
 }
 
 static ABI void *thread_self(void) { return runtime_thread_current(); }
@@ -169,6 +176,16 @@ static ABI int32_t attr_set_stack(ThreadAttr **slot,uint64_t size) {
 static ABI int32_t attr_get_stack(ThreadAttr **slot,uint64_t *size) {
     ThreadAttr *a=find_attr(slot);
     if (!a || !size) return ERR(22);
+    *size=a->stack; return 0;
+}
+/* scePthreadAttrGetstack (copied from saulob's 13 Sentinels PC port, github.com/saulob/13-sentinels-aegis-rim-pc/src/runtime_thread.c,
+ * GPL-2; adapted): callers query the attributes of the thread they run on, so the address is that
+ * thread's guest stack under bbcpu (NULL where the host thread's own stack is in use). */
+static ABI int32_t attr_get_stack_full(ThreadAttr **slot,void **address,uint64_t *size) {
+    ThreadAttr *a=find_attr(slot);
+    if (!a || !address || !size) return ERR(22);
+    GuestThread *t=current;
+    *address=t ? t->guest_stack : NULL;
     *size=a->stack; return 0;
 }
 static ABI int32_t attr_set_detach(ThreadAttr **slot,int state) {
@@ -316,6 +333,12 @@ static ABI int32_t thread_detach(GuestThread *t) {
     if (!t->host_owned) pthread_detach(t->host);
     return 0;
 }
+/* scePthreadCancel (github.com/saulob/13-sentinels-aegis-rim-pc/src/runtime_thread.c, GPL-2): cancelling a running guest thread is not supported. */
+static ABI int32_t thread_cancel(GuestThread *t) {
+    if (!find_thread(t) || t->finished) return ERR(3);
+    fputs("STOP: scePthreadCancel of a running thread is not supported\n",stderr);
+    exit(21);
+}
 static ABI __attribute__((noreturn)) void thread_exit(void *value) {
     GuestThread *t=runtime_thread_current();
     if (t->host_owned) { fputs("STOP: pthread_exit on host-owned/main thread\n",stderr); exit(21); }
@@ -379,28 +402,28 @@ int32_t runtime_thread_join_spawned(void *thread,void **result) {
 
 uintptr_t runtime_thread_resolve(const char *name) {
     static const struct { const char *nid; void *fn; } table[]={
-        {"aI+OeCz8xrQ#p#J",thread_self}, {"EotR8a3ASf4#I#J",thread_self},
-        {"9BcDykPmo1I#p#J",guest_error},
-        {"nsYoNRywwNg#p#J",attr_init}, {"62KCwEMmzcM#p#J",attr_destroy},
-        {"x1X76arYMxU#p#J",attr_get}, {"8+s5BzZjxSg#p#J",attr_affinity},
-        {"UTXzJbWhhTE#p#J",attr_set_stack}, {"-Wreprtu0Qs#p#J",attr_set_detach},
-        {"4+h9EzwKF4I#p#J",attr_set_policy}, {"DzES9hQF4f4#p#J",attr_set_param},
-        {"3qxgM4ezETA#p#J",attr_set_affinity}, {"eXbUSpEaTsA#p#J",attr_set_inherit},
-        {"JaRMy+QcpeU#p#J",attr_get_detach}, {"-fA+7ZlGDQs#p#J",attr_get_stack},
-        {"FXPWHNk8Of0#p#J",attr_get_param}, {"El+cQ20DynU#p#J",attr_set_guard},
-        {"6UgtwV+0zb4#p#J",thread_create}, {"onNY9Byn-W8#p#J",thread_join},
-        {"4qGrR6eoP9Y#p#J",thread_detach}, {"3kg7rT0NQIs#p#J",thread_exit},
-        {"T72hz6ffq08#p#J",thread_yield}, {"1tKyG7RlMJo#p#J",thread_get_prio},
-        {"W0Hpm2X0uPE#p#J",thread_set_prio}, {"bt3CTBKmGyI#p#J",thread_set_affinity}, {"rcrVFJsQWRY#p#J",thread_get_affinity},
-        {"GBUY7ywdULE#p#J",thread_rename}, {"3PtV6p3QNX4#p#J",thread_equal},
-        {"wtkt-teR1so#I#J",posix_attr_init}, {"zHchY8ft5pk#I#J",posix_attr_destroy},
-        {"E+tyo3lp5Lw#I#J",posix_attr_set_detach}, {"2Q0z6rnBrTE#I#J",posix_attr_set_stack},
-        {"euKRgm0Vn2M#I#J",posix_attr_set_param}, {"OxhIB8LB-PQ#I#J",posix_create},
-        {"Jmi+9w9u0E4#I#J",posix_create_name}, {"h9CcP3J0oVM#I#J",posix_join},
-        {"FJrT5LuUBAU#I#J",thread_exit},
+        {"aI+OeCz8xrQ",thread_self}, {"EotR8a3ASf4",thread_self},
+        {"9BcDykPmo1I",guest_error},
+        {"nsYoNRywwNg",attr_init}, {"62KCwEMmzcM",attr_destroy},
+        {"x1X76arYMxU",attr_get}, {"8+s5BzZjxSg",attr_affinity},
+        {"UTXzJbWhhTE",attr_set_stack}, {"-Wreprtu0Qs",attr_set_detach},
+        {"4+h9EzwKF4I",attr_set_policy}, {"DzES9hQF4f4",attr_set_param},
+        {"3qxgM4ezETA",attr_set_affinity}, {"eXbUSpEaTsA",attr_set_inherit},
+        {"JaRMy+QcpeU",attr_get_detach}, {"-fA+7ZlGDQs",attr_get_stack}, {"-quPa4SEJUw",attr_get_stack_full},
+        {"FXPWHNk8Of0",attr_get_param}, {"El+cQ20DynU",attr_set_guard},
+        {"6UgtwV+0zb4",thread_create}, {"onNY9Byn-W8",thread_join},
+        {"4qGrR6eoP9Y",thread_detach}, {"qBDmpCyGssE",thread_cancel}, {"3kg7rT0NQIs",thread_exit},
+        {"T72hz6ffq08",thread_yield}, {"1tKyG7RlMJo",thread_get_prio},
+        {"W0Hpm2X0uPE",thread_set_prio}, {"bt3CTBKmGyI",thread_set_affinity}, {"rcrVFJsQWRY",thread_get_affinity},
+        {"GBUY7ywdULE",thread_rename}, {"3PtV6p3QNX4",thread_equal},
+        {"wtkt-teR1so",posix_attr_init}, {"zHchY8ft5pk",posix_attr_destroy},
+        {"E+tyo3lp5Lw",posix_attr_set_detach}, {"2Q0z6rnBrTE",posix_attr_set_stack},
+        {"euKRgm0Vn2M",posix_attr_set_param}, {"OxhIB8LB-PQ",posix_create},
+        {"Jmi+9w9u0E4",posix_create_name}, {"h9CcP3J0oVM",posix_join},
+        {"FJrT5LuUBAU",thread_exit},
     };
     for (size_t i=0;i<sizeof(table)/sizeof(*table);++i)
-        if (!strcmp(name,table[i].nid)) return (uintptr_t)table[i].fn;
+        if (runtime_nid_is(name,table[i].nid)) return (uintptr_t)table[i].fn;
     return 0;
 }
 void runtime_thread_report(void) {

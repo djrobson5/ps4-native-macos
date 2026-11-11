@@ -15,4 +15,4 @@ for i in range(nr):
         slots[target] = names[value]
 for arg in sys.argv[1:]:
     nid = slots.get(int(arg, 16))
-    print(arg, nid, symbols.get(nid) if nid else '')
+    print(arg, nid, symbols.get(nid.split("#")[0]) if nid else '')

@@ -64,7 +64,7 @@ _Static_assert(sizeof(SearchCond)==64 && sizeof(SearchResult)==56,"dir name sear
 static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
 static int initialized;
 static char title_id[16]="UNKNOWN";
-static struct { int used; char host[700], meta[700]; } slots[SLOTS];
+static struct { int used; char host[700], meta[700]; uint64_t blocks; } slots[SLOTS];
 static char memory_path[720];
 static uint64_t memory_size;
 static size_t mounts_done, memory_writes;
@@ -153,7 +153,7 @@ static ABI int32_t save_terminate(void) {
     if (!initialized) return ERR_NOT_INITIALIZED;
     initialized=0; return 0;
 }
-static int32_t mount(int32_t user, const char *title, const DirName *dir, uint32_t mode, MountResult *result) {
+static int32_t mount(int32_t user, const char *title, const DirName *dir, uint64_t blocks, uint32_t mode, MountResult *result) {
     if (!initialized) return ERR_NOT_INITIALIZED;
     if (user<0) return ERR_INVALID_USER;
     if (!dir || !result || !valid_name(dir->data,sizeof(dir->data))) return ERR_PARAMETER;
@@ -175,6 +175,7 @@ static int32_t mount(int32_t user, const char *title, const DirName *dir, uint32
     if (!exists && (make_dirs(host) || make_dirs(meta))) { pthread_mutex_unlock(&lock); return ERR_INTERNAL; }
     if (!exists) { Param empty={0}; write_param(meta,&empty); }
     slots[slot].used=1;
+    slots[slot].blocks=blocks;
     snprintf(slots[slot].host,sizeof(slots[slot].host),"%s",host);
     snprintf(slots[slot].meta,sizeof(slots[slot].meta),"%s",meta);
     memset(result,0,sizeof(*result));
@@ -191,11 +192,11 @@ static int32_t mount(int32_t user, const char *title, const DirName *dir, uint32
 }
 static ABI int32_t save_mount(const Mount1 *m, MountResult *result) {
     if (!m) return ERR_PARAMETER;
-    return mount(m->user,m->title ? m->title->data : NULL,m->dir,m->mode,result);
+    return mount(m->user,m->title ? m->title->data : NULL,m->dir,m->blocks,m->mode,result);
 }
 static ABI int32_t save_mount2(const Mount2 *m, MountResult *result) {
     if (!m) return ERR_PARAMETER;
-    return mount(m->user,NULL,m->dir,m->mode,result);
+    return mount(m->user,NULL,m->dir,m->blocks,m->mode,result);
 }
 static int slot_of(const MountPoint *point) {
     if (!point || strncmp(point->data,"/savedata",9)) return -1;
@@ -209,6 +210,33 @@ static ABI int32_t save_umount(const MountPoint *point) {
     if (slot>=0) { runtime_file_unmount(point->data); slots[slot].used=0; }
     pthread_mutex_unlock(&lock);
     return slot>=0 ? 0 : ERR_NOT_FOUND;
+}
+/* sceSaveDataGetMountInfo, copied from saulob's 13 Sentinels PC port (github.com/saulob/13-sentinels-aegis-rim-pc/src/runtime_savedata.c,
+ * GPL-2): the blocks the mount was given (or its files' size if larger) and what is left. */
+#define BLOCK_SIZE 32768
+static uint64_t used_blocks(const char *dir) {
+    uint64_t bytes=0;
+    DIR *d=opendir(dir);
+    if (!d) return 0;
+    for (struct dirent *e;(e=readdir(d));) {
+        char path[1100]; struct stat st;
+        snprintf(path,sizeof(path),"%s/%s",dir,e->d_name);
+        if (strcmp(e->d_name,".") && strcmp(e->d_name,"..") && !stat(path,&st) && S_ISREG(st.st_mode)) bytes+=(uint64_t)st.st_size;
+    }
+    closedir(d);
+    return (bytes+BLOCK_SIZE-1)/BLOCK_SIZE;
+}
+static ABI int32_t save_get_mount_info(const MountPoint *point, SearchInfo *info) {
+    if (!initialized) return ERR_NOT_INITIALIZED;
+    if (!info) return ERR_PARAMETER;
+    pthread_mutex_lock(&lock);
+    int slot=slot_of(point);
+    if (slot<0) { pthread_mutex_unlock(&lock); return (int32_t)0x809F0004; /* NOT_MOUNTED */ }
+    uint64_t used=used_blocks(slots[slot].host), total=slots[slot].blocks>used ? slots[slot].blocks : used;
+    pthread_mutex_unlock(&lock);
+    memset(info,0,sizeof(*info));
+    info->blocks=total; info->free_blocks=total-used;
+    return 0;
 }
 static ABI int32_t save_set_param(const MountPoint *point, uint32_t type, const void *buffer, uint64_t size) {
     if (!initialized) return ERR_NOT_INITIALIZED;
@@ -351,7 +379,7 @@ static ABI int32_t memory_set(int32_t user, void *buffer, uint64_t size, int64_t
 static const RuntimeExport exports[]={
     {"sceSaveDataInitialize",save_initialize}, {"sceSaveDataInitialize2",save_initialize},
     {"sceSaveDataInitialize3",save_initialize}, {"sceSaveDataTerminate",save_terminate},
-    {"sceSaveDataMount",save_mount}, {"sceSaveDataMount2",save_mount2}, {"sceSaveDataUmount",save_umount},
+    {"sceSaveDataMount",save_mount}, {"sceSaveDataMount2",save_mount2}, {"sceSaveDataUmount",save_umount}, {"sceSaveDataGetMountInfo",save_get_mount_info},
     {"sceSaveDataSetParam",save_set_param}, {"sceSaveDataSaveIcon",save_icon}, {"sceSaveDataDelete",save_delete},
     {"sceSaveDataDirNameSearch",save_search},
     {"sceSaveDataSetupSaveDataMemory",memory_setup}, {"sceSaveDataGetSaveDataMemory",memory_get},

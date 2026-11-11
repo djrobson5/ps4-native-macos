@@ -15,6 +15,8 @@
 #define ERR_INVALID_MINUTE ((int32_t)0x80B5000C)
 #define ERR_INVALID_SECOND ((int32_t)0x80B5000D)
 #define ERR_INVALID_MICROSECOND ((int32_t)0x80B5000E)
+#define ERR_INVALID_VALUE ((int32_t)0x80B50003)
+#define WIN32_EPOCH_TICKS UINT64_C(50491123200000000) /* 1601-01-01 */
 #define UNIX_EPOCH_TICKS UINT64_C(0xdcbffeff2bc000)
 #define TICKS_PER_DAY UINT64_C(86400000000)
 
@@ -140,6 +142,22 @@ static ABI int32_t rtc_rfc2822_local(char *out, const uint64_t *utc_tick) {
     return 0;
 }
 
+/* FILETIME: 100 ns units since 1601-01-01, the date taken as it is (no time zone change).
+ * Copied from saulob's 13 Sentinels PC port (github.com/saulob/13-sentinels-aegis-rim-pc/src/runtime_rtc.c, GPL-2). */
+static ABI int32_t rtc_get_win32_filetime(const DateTime *t, uint64_t *filetime) {
+    if (!t || !filetime) return ERR_INVALID_POINTER;
+    int32_t e=validate(t);
+    if (e) return e;
+    uint64_t tick=to_tick(t);
+    if (tick<WIN32_EPOCH_TICKS) return ERR_INVALID_VALUE;
+    *filetime=(tick-WIN32_EPOCH_TICKS)*10; return 0;
+}
+static ABI int32_t rtc_set_win32_filetime(DateTime *t, uint64_t filetime) {
+    if (!t) return ERR_INVALID_POINTER;
+    const DateTime last={9999,12,31,23,59,59,999999};
+    if (filetime/10>to_tick(&last)-WIN32_EPOCH_TICKS) return ERR_INVALID_VALUE;
+    from_tick(WIN32_EPOCH_TICKS+filetime/10,t); return 0;
+}
 static const RuntimeExport exports[]={
     {"sceRtcGetCurrentClockLocalTime",rtc_current_local}, {"sceRtcGetCurrentClock",rtc_current_clock},
     {"sceRtcGetCurrentTick",rtc_current_tick}, {"sceRtcGetCurrentNetworkTick",rtc_current_tick},
@@ -147,5 +165,6 @@ static const RuntimeExport exports[]={
     {"sceRtcGetDayOfWeek",rtc_day_of_week}, {"sceRtcGetTick",rtc_get_tick}, {"sceRtcSetTick",rtc_set_tick},
     {"sceRtcGetTickResolution",rtc_tick_resolution}, {"sceRtcSetTime_t",rtc_set_time_t},
     {"sceRtcGetTime_t",rtc_get_time_t}, {"sceRtcFormatRFC2822LocalTime",rtc_rfc2822_local},
+    {"sceRtcGetWin32FileTime",rtc_get_win32_filetime}, {"sceRtcSetWin32FileTime",rtc_set_win32_filetime},
 };
 uintptr_t runtime_rtc_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }

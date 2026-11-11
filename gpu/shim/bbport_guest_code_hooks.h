@@ -60,4 +60,10 @@ bool InstallGuestCodeHookAfter(void* address, std::span<const std::uint8_t> expe
 int GuestCodeProtection();
 void KeepGuestCodeWritable();
 
+/// The loaded executable image (bbgpu_patch_image): once it is set, a hook at an address outside
+/// [image, image + size) is refused before any byte there is read. Every hook's offsets are from
+/// one build of the Bloodborne executable; another image (13 Sentinels') is smaller or laid out
+/// differently, and its offsets can lie past its end.
+void SetGuestImage(const void* image, std::uint64_t size);
+
 } // namespace Core
