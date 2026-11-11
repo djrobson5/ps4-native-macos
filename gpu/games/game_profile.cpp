@@ -13,9 +13,10 @@ namespace Game {
 
 // One per game (games/<game>.cpp).
 extern const Profile BloodborneProfile;
+extern const Profile ThirteenSentinelsProfile;
 
 namespace {
-constexpr std::array<const Profile*, 1> Profiles = {&BloodborneProfile};
+constexpr std::array<const Profile*, 2> Profiles = {&BloodborneProfile, &ThirteenSentinelsProfile};
 std::atomic<const Profile*> active{nullptr};
 std::atomic<bool> bloodborne_109{false};
 } // namespace
@@ -26,6 +27,10 @@ bool IsBloodborne109() {
 
 void SetBloodborne109(bool bloodborne) {
     bloodborne_109.store(bloodborne, std::memory_order_release);
+}
+
+bool IsThirteenSentinels() {
+    return Active() == &ThirteenSentinelsProfile;
 }
 
 void Select(const char* serial) {

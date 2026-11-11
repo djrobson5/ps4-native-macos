@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
+#include <array>
 #include <dlfcn.h>
 #include "bbport_metal_residency.h"
 #include <map>
@@ -5217,6 +5219,89 @@ bool Rasterizer::ReadMemory(VAddr addr, u64 size, bool assume_locks) {
     }
     buffer_cache.ReadMemory(addr, size, false, assume_locks);
     return true;
+}
+
+VideoCore::ImageSyncReport Rasterizer::SyncImageForCpuRead(VAddr addr, u64 size) {
+    VideoCore::ImageSyncReport report;
+    report.address = addr;
+    report.size = size;
+    // bbport: runs on the GPU command thread.
+    const auto run = [this, addr, size, &report] {
+        using Result = VideoCore::ImageSyncReport::Result;
+        // As SyncForCpuRead: the draw recording thread idle, so what the game drew is recorded.
+        DrainDrawPipe();
+        if (!IsMapped(addr, 1)) {
+            report.result = Result::NotMapped;
+            return;
+        }
+        auto candidates = texture_cache.ImagesOverRange(addr, size ? size : 1);
+        for (const auto& candidate : candidates) {
+            report.images.push_back(candidate.info);
+        }
+        if (candidates.empty()) {
+            report.result = Result::NoImage;
+            return;
+        }
+        // bbport: the newest GPU-written image starting at the address. Nothing else is written
+        // back: another image over the range could hold memory the reader never asked about.
+        int best = -1;
+        for (size_t i = 0; i < candidates.size(); ++i) {
+            const auto& info = candidates[i].info;
+            if (info.address != addr || !info.gpu_modified) {
+                continue;
+            }
+            if (best < 0 || info.write_tick > candidates[best].info.write_tick) {
+                best = static_cast<int>(i);
+            }
+        }
+        if (best < 0) {
+            report.result = Result::NotGpuModified;
+            return;
+        }
+        report.chosen = best;
+        const auto& chosen = candidates[best];
+        // The texture cache's own rule for reading an image back (SafeToDownload): a CPU write
+        // since, or newer data in the buffer cache, means the guest's memory is the newer.
+        constexpr u32 Newer = static_cast<u32>(VideoCore::ImageFlagBits::CpuDirty |
+                                               VideoCore::ImageFlagBits::GpuDirty);
+        if (chosen.info.flags & Newer) {
+            report.result = Result::NotCurrent;
+            return;
+        }
+        if (!image_sync_ledger.NeedsSync(chosen.info.address, chosen.info.uid,
+                                         chosen.info.write_tick)) {
+            report.result = Result::AlreadySynced;
+            return;
+        }
+        VideoCore::Image* image = texture_cache.TryGetImage(chosen.id, chosen.info.uid);
+        if (!image) {
+            report.result = Result::NoImage;
+            return;
+        }
+        // The tiling pass has shaders for these pixel widths only (it asserts on others).
+        constexpr std::array<u32, 6> TilingWidths{8, 16, 32, 64, 96, 128};
+        const auto start = std::chrono::steady_clock::now();
+        if ((chosen.info.tiled && std::ranges::find(TilingWidths, chosen.info.bits) == TilingWidths.end()) ||
+            !buffer_cache.WriteImageToGuestMemory(*image)) {
+            report.result = Result::NotTiledBack;
+            return;
+        }
+        // The GPU's work, the tiling pass included, completes before the guest reads.
+        Finish();
+        ReadMemory(chosen.info.address, chosen.info.guest_size, true); // an arena's bytes to the CPU
+        report.milliseconds =
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start)
+                .count();
+        report.bytes = chosen.info.guest_size;
+        image_sync_ledger.NoteSynced(chosen.info.address, chosen.info.uid, chosen.info.write_tick);
+        report.result = Result::TiledBack;
+    };
+    if (OnStageA()) {
+        run(); // already on the GPU command thread
+    } else {
+        liverpool->SendCommand<true>(run);
+    }
+    return report;
 }
 
 void Rasterizer::ProcessDownloadImages() {

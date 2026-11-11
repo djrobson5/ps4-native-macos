@@ -11,6 +11,7 @@
 #include <unordered_map>
 #include <algorithm>
 #include <bit>
+#include <limits>
 #include <cstdlib>
 #include <magic_enum/magic_enum.hpp>
 #include "bbport_copy.h"
@@ -3452,6 +3453,12 @@ bool BufferCache::SynchronizeMemoryFromImage(const Buffer* arena, u64 arena_offs
     // copy below changes image state, so the helper finishes first.
     runtime.BeforeImageAccess();
     Image& image = texture_cache.GetImage(image_id);
+    return TileImageIntoBuffer(image, arena, arena_offset, device_addr, size);
+}
+
+// bbport: the part of SynchronizeMemoryFromImage that tiles a known image into the buffer.
+bool BufferCache::TileImageIntoBuffer(Image& image, const Buffer* arena, u64 arena_offset,
+                                      VAddr device_addr, u32 size) {
     ASSERT_MSG(device_addr == image.info.guest_address,
                "Texel buffer aliases image subresources {:x} : {:x}", device_addr,
                image.info.guest_address);
@@ -3535,6 +3542,30 @@ bool BufferCache::SynchronizeMemoryFromImage(const Buffer* arena, u64 arena_offs
         NoteGpuWrite(device_addr, size);
     }
     return true;
+}
+
+// bbport: Rasterizer::SyncImageForCpuRead's write-back of one image into the game's memory.
+bool BufferCache::WriteImageToGuestMemory(Image& image) {
+    const VAddr address = image.info.guest_address;
+    const u64 bytes = image.info.guest_size;
+    if (address == 0 || bytes == 0 || bytes > std::numeric_limits<u32>::max()) {
+        return false;
+    }
+    const u32 size = static_cast<u32>(bytes);
+    runtime.BeforeImageAccess(); // as SynchronizeMemoryFromImage, before the image's state changes
+    if (UnifiedGuestMemory()) {
+        // The tiling pass must write the game's own memory: the pool, where the range lies in
+        // it (a copy ObtainBuffer might make for it would hold the pixels only on the GPU).
+        ProcessUnifiedUnmaps();
+        const auto range = UnifiedRange(address, size);
+        if (!range) {
+            return false;
+        }
+        return TileImageIntoBuffer(image, range->first, range->second, address, size);
+    }
+    // The arena (a GPU write there: the range counts as GPU-modified, so ReadMemory downloads it).
+    const auto [arena, offset] = ObtainBuffer(address, size, true);
+    return TileImageIntoBuffer(image, arena, offset, address, size);
 }
 
 

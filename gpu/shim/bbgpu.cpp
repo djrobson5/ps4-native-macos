@@ -5,6 +5,7 @@
 #include "bbport_frame_rate.h"
 #include "bbport_draw_census.h"
 #include "bbport_render_boundary.h"
+#include "bbport_snapshot_sync.h"
 #include "bbport_game_hooks.h"
 #include "bbport_guest_code_hooks.h"
 // bbport: glue between the C loader and the vendored shadPS4 video core.
@@ -391,6 +392,12 @@ extern "C" void bbgpu_set_game(int bloodborne_1_09) {
 }
 
 extern "C" void bbgpu_patch_image(unsigned char* image, uint64_t size) {
+    // 13 Sentinels: its own hook (the save thumbnail), checked byte for byte; none of Bloodborne's.
+    if (!Game::IsBloodborne109() && Game::IsThirteenSentinels()) {
+        Core::SetGuestImage(image, size);
+        BbSnapshotSync::PatchImage(image, size);
+        return;
+    }
     // Every hook below is written for one build of the Bloodborne executable: its offsets lie past
     // another game's image. Not installed unless the loader declared Bloodborne (bbgpu_set_game);
     // the installer also refuses an address outside the image.

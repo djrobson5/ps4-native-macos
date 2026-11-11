@@ -434,6 +434,9 @@ target_include_directories(fixed-quad-tessellation-test PRIVATE shadps4)
 add_executable(fan-triangles-test EXCLUDE_FROM_ALL ../tests/test_fan_triangles.cpp)
 target_compile_options(fan-triangles-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(fan-triangles-test PRIVATE ..)
+add_executable(image-sync-ledger-test EXCLUDE_FROM_ALL ../tests/test_image_sync_ledger.cpp)
+target_compile_options(image-sync-ledger-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(image-sync-ledger-test PRIVATE ..)
 add_executable(motion-history-test EXCLUDE_FROM_ALL ../tests/test_motion_history.cpp)
 target_compile_options(motion-history-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(motion-history-test PRIVATE ..)
@@ -500,7 +503,7 @@ target_compile_options(upscaler-support-test PRIVATE -UNDEBUG)
 # stay, so a repair has somewhere to start.
 if (BUILD_TESTING)
     set(BBGPU_TESTS image-upload-hash-test slot-vector-test handle-table-test avplayer-queue-test
-        avplayer-clock-test fixed-quad-tessellation-test fan-triangles-test motion-history-test
+        avplayer-clock-test fixed-quad-tessellation-test fan-triangles-test image-sync-ledger-test motion-history-test
         ui-composition-test cp-decoder-test settings-test trophy-queue-test upscaler-support-test)
     foreach(test IN LISTS BBGPU_TESTS)
         add_test(NAME ${test} COMMAND ${test})

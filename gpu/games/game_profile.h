@@ -55,6 +55,10 @@ const Profile* Active();
 bool IsBloodborne109();
 void SetBloodborne109(bool bloodborne);
 
+/// Whether the active profile is 13 Sentinels: Aegis Rim's (chosen by its TITLE_ID; false for any
+/// other game and with BB_GAME_PROFILE=none). Hooks written for that game's executable check it.
+bool IsThirteenSentinels();
+
 /// The active profile's buffer copy shader, or 0.
 inline std::uint64_t BufferCopyShader() {
     const Profile* profile = Active();

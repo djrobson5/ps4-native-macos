@@ -24,6 +24,7 @@
 #include "video_core/renderer_vulkan/vk_temporal_upscaler.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
+#include "video_core/image_sync.h"
 #include "video_core/texture_cache/texture_cache.h"
 
 namespace AmdGpu {
@@ -264,6 +265,13 @@ public:
     /// `guest_rip`: the guest instruction that wrote (0: unknown), see BufferCache::NoteCpuWrite.
     bool OnWriteFault(VAddr addr, bool assume_locks, u64 guest_rip = 0);
     bool ReadMemory(VAddr addr, u64 size, bool assume_locks = false);
+    /// bbport: the guest CPU is about to read [addr, addr + size), memory the GPU may have written
+    /// as an image (a game encoding its own screenshot): the newest image starting there that the
+    /// GPU wrote is written back into the guest's memory in its tiled layout (the buffer cache's
+    /// tiling pass), once the GPU has finished. Callable from any thread: it runs on the GPU
+    /// command thread, as SyncForCpuRead does, and returns when the bytes are in place. Writes
+    /// back once per GPU write of the image (a reader asking once per strip syncs once).
+    VideoCore::ImageSyncReport SyncImageForCpuRead(VAddr addr, u64 size);
     void ProcessDownloadImages();
     bool IsMapped(VAddr addr, u64 size);
     void MapMemory(VAddr addr, u64 size);
@@ -473,6 +481,8 @@ private:
     VideoCore::BufferCache buffer_cache;
     VideoCore::TextureCache texture_cache;
     AmdGpu::Liverpool* liverpool;
+    /// bbport: SyncImageForCpuRead's record of what the guest's memory holds (command thread).
+    VideoCore::ImageSyncLedger image_sync_ledger;
     Core::MemoryManager* memory;
     boost::icl::interval_set<VAddr> mapped_ranges;
     Common::SharedFirstMutex mapped_ranges_mutex;

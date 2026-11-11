@@ -829,10 +829,11 @@ int main(int argc, char **argv) {
         free(patch_memory);
     }
     /* The GPU library's guest hooks and patches (frame rate, game hooks, game menu, engine fixes) are
-     * written for Bloodborne 1.09 and read its offsets, which lie past 13 Sentinels' 27 MB image:
-     * not for another game's executable. (The hook installer also refuses an address outside the image.) */
+     * written for Bloodborne 1.09 and read its offsets, which lie past 13 Sentinels' 27 MB image: it
+     * installs them only for Bloodborne, and for 13 Sentinels its own thumbnail hook. (The hook
+     * installer also refuses an address outside the image.) */
     bbgpu_set_guest_image(image, size); /* any image: a hook outside it is refused before it is read */
-    if (!cpu_only && bloodborne_image) bbgpu_patch_image(image, size);
+    if (!cpu_only) bbgpu_patch_image(image, size); /* Bloodborne's hooks, or 13 Sentinels' thumbnail hook */
     protect(traps, round_page((import_count + 1) * 32), 5);
     protect(image, round_page(size), 0);
     int executable_entry = 0;

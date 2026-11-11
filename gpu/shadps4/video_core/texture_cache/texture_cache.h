@@ -15,11 +15,13 @@
 #include <unordered_set>
 #include <boost/container/small_vector.hpp>
 #include <queue>
+#include <vector>
 #include <tsl/robin_map.h>
 
 #include "common/lru_cache.h"
 #include "common/slot_vector.h"
 #include "shader_recompiler/resource.h"
+#include "video_core/image_sync.h"
 #include "video_core/multi_level_page_table.h"
 #include "video_core/texture_cache/image.h"
 #include "video_core/texture_cache/image_view.h"
@@ -91,6 +93,15 @@ public:
 
     /// bbport (diagnostics): the images over [addr, addr + size), described briefly.
     std::string DescribeImagesIn(VAddr addr, u64 size);
+
+    /// bbport: an image over [addr, addr + size) for Rasterizer::SyncImageForCpuRead.
+    struct CpuReadCandidate {
+        VideoCore::ImageSyncImage info;
+        ImageId id;
+    };
+    /// bbport: the images over [addr, addr + size) (under the cache's lock, which the caller must
+    /// not hold). The ids are valid while no image is freed; check with TryGetImage(id, info.uid).
+    std::vector<CpuReadCandidate> ImagesOverRange(VAddr addr, u64 size);
 
     /// bbport: changes whenever an image is registered or unregistered.
     [[nodiscard]] u64 RegistryGeneration() const noexcept {

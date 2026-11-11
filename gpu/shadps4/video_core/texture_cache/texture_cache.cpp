@@ -181,6 +181,35 @@ std::string TextureCache::DescribeImagesIn(VAddr addr, u64 size) {
     return out;
 }
 
+std::vector<TextureCache::CpuReadCandidate> TextureCache::ImagesOverRange(VAddr addr, u64 size) {
+    std::vector<CpuReadCandidate> out;
+    if (size == 0) {
+        return out;
+    }
+    std::scoped_lock lock{mutex};
+    ForEachImageInRegion(addr, size, [&](ImageId image_id, Image& image) {
+        ImageSyncImage info;
+        info.address = image.info.guest_address;
+        info.guest_size = image.info.guest_size;
+        info.width = image.info.size.width;
+        info.height = image.info.size.height;
+        info.format = u32(image.info.pixel_format);
+        info.bits = image.info.num_bits;
+        info.tile_mode = u32(image.info.tile_mode);
+        info.flags = u32(image.flags & ~ImageFlagBits::Picked); // Picked: this walk's own mark
+        info.tiled = image.info.props.is_tiled;
+        info.gpu_modified = True(image.flags & ImageFlagBits::GpuModified);
+        info.render_target = image.usage.render_target;
+        info.depth_target = image.usage.depth_target;
+        info.storage = image.usage.storage;
+        info.texture = image.usage.texture;
+        info.write_tick = image.gpu_write_tick;
+        info.uid = image.image_uid;
+        out.push_back({info, image_id});
+    });
+    return out;
+}
+
 void TextureCache::ProcessDownloadImages() {
     // bbport: called for every fence (~450 a frame): the lock only when something is queued.
     if (!downloads_queued.load(std::memory_order_acquire)) {

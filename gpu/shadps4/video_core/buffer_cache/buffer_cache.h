@@ -42,6 +42,7 @@ class StagingBufferPool;
 namespace VideoCore {
 
 class TextureCache;
+struct Image;
 class MemoryTracker;
 class PageManager;
 
@@ -134,6 +135,13 @@ public:
     [[nodiscard]] std::pair<const Buffer*, u64> ObtainBuffer(VAddr device_addr, u32 size,
                                                              bool is_written,
                                                              bool is_texel_buffer = false);
+
+    /// bbport: writes the GPU's pixels of `image` into the game's memory at its address, in the
+    /// guest's tiled layout (TileManager::TileImage): into the pool on unified memory (the CPU
+    /// sees them once the GPU has finished: Rasterizer::Finish), else into the arena, which
+    /// Rasterizer::ReadMemory then downloads. False: no buffer over the memory, or a layout the
+    /// tiling pass does not support. GPU command thread only.
+    bool WriteImageToGuestMemory(Image& image);
 
     /// Attempts to obtain a buffer without modifying the cache contents.
     [[nodiscard]] std::pair<const Buffer*, u64> ObtainBufferForImage(VAddr device_addr, u32 size);
@@ -373,6 +381,10 @@ private:
 
     /// `offset`: where device_addr is in `buffer` (an arena, or the unified memory pool).
     bool SynchronizeMemoryFromImage(const Buffer* buffer, u64 offset, VAddr device_addr, u32 size);
+    /// The tiling pass of SynchronizeMemoryFromImage for a given image (which starts at
+    /// device_addr). Records GPU work.
+    bool TileImageIntoBuffer(Image& image, const Buffer* buffer, u64 offset, VAddr device_addr,
+                             u32 size);
 
     /// bbport UnifiedGuestMemory: the pool buffer and offset of [addr, addr + size) when it is in one
     /// mapping of pool memory (its page table entries are set on the way), else nothing.
