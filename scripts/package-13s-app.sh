@@ -10,9 +10,15 @@
 # Options:
 #   --dest DIR    the folder (default: ~/Games/13 Sentinels Aegis Rim)
 #   --game DIR    the game's folder to copy when <dest>/CUSA19610 is missing
-#                 (default: ../dump/CUSA19610/uroot beside this repo)
-#   --icon PNG    the app icon's picture, put on a dark square (e.g. the save data's icon0.png);
-#                 none: the app has no icon. Game pictures stay out of git: give one here.
+#                 (default: ../dump/CUSA19610/uroot beside this repo). Before anything is built it
+#                 is checked with scripts/game_check_13s.py (CUSA19610 1.00, the supported
+#                 eboot.bin): a game the runtime would refuse stops the script with the reason.
+#   --icon PNG    the app icon's picture, put on a dark square. Without it the picture is chosen
+#                 by scripts/game_check_13s.py --pick-icon: the game folder's sce_sys/icon0.png (the
+#                 one to be copied, or <dest>/CUSA19610's), else the newest save data's icon0.png
+#                 under $S13_APP_DATA_DIR (default ~/Library/Application Support/13 Sentinels),
+#                 else none: the app gets no icon (macOS's generic one). One line says which.
+#                 Game pictures stay out of git.
 #   --no-game     leave the game's folder alone (only the app)
 #   --icon-cache DIR   where the trophy icons are kept between runs (default: build/trophy-icons,
 #                 which git ignores)
@@ -47,6 +53,13 @@ while (($#)); do
     esac
 done
 
+# The game that is about to be copied must be the one the runtime boots (before the long work).
+game_args=()
+if ((copy_game)) && [[ ! -f $dest/CUSA19610/eboot.bin ]]; then
+    game_args=(--game "$game_src")
+    python3 -I scripts/game_check_13s.py "$game_src" >&2 || exit 1
+fi
+
 app_name='13 Sentinels'
 bundle_id=org.bbruntime.13sentinels
 build=build/macos-arm64
@@ -75,8 +88,19 @@ cp "$payload/Contents/Resources/game/LICENSE" "$app/Contents/Resources/licenses/
 [[ -f $payload/Contents/Resources/game/LICENSE.GPL-3.0 ]] &&
     cp "$payload/Contents/Resources/game/LICENSE.GPL-3.0" "$app/Contents/Resources/licenses/bbnet20.LICENSE.GPL-3.0"
 
-# The icon: the picture on a dark square, every size iconutil wants.
+# The icon: the picture on a dark square, every size iconutil wants. The game's is built before the
+# game is copied, hence the game folder to be copied is given too.
 icon_key=
+if [[ -n $icon ]]; then
+    echo "Icon: $icon (given)"
+else
+    icon=$(python3 -I scripts/game_check_13s.py --pick-icon ${game_args[@]+"${game_args[@]}"} --game "$dest/CUSA19610")
+    case $icon in
+    '') echo 'Icon: none (the app gets the generic icon)' ;;
+    */user/savedata/*) echo "Icon: save (the newest save data's icon0.png: $icon)" ;;
+    *) echo "Icon: game ($icon)" ;;
+    esac
+fi
 if [[ -n $icon ]]; then
     [[ -f $icon ]] || { echo "No icon file: $icon" >&2; exit 1; }
     square=$work/square.png

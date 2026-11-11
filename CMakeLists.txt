@@ -321,6 +321,10 @@ if (BUILD_TESTING)
     if (Python3_Interpreter_FOUND)
         add_test(NAME trophy-catalog COMMAND Python3::Interpreter -I
                  ${CMAKE_SOURCE_DIR}/tests/test_trophy_catalog.py)
+        # The pre-install check of a game folder or fake PKG (no game data; the key test needs the
+        # 'cryptography' package and is skipped without it).
+        add_test(NAME game-check-13s COMMAND Python3::Interpreter -I
+                 ${CMAKE_SOURCE_DIR}/tests/test_game_check_13s.py)
     endif()
 
     # The loader test builds a guest image with 4 KiB pages; macOS has 16 KiB ones.
