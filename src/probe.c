@@ -11,6 +11,7 @@
 #include "runtime.h"
 #include "runtime_patches.h"
 #include "runtime_prepare.h"
+#include "app_bundle.h"
 #include "cpu/bbcpu.h"
 #include "gpu/bbgpu.h"
 #if !(defined(__x86_64__) || (defined(__aarch64__) && defined(__APPLE__))) || !defined(__GNUC__)
@@ -420,6 +421,14 @@ void runtime_restart(void) {
     runtime_restarting = 1;
     __sync_synchronize();
 #ifndef _WIN32
+    if (getenv("BB_APP_BUNDLE")) {
+        /* A Mac app (app_bundle.c) has no run.sh, and exec'ing its own executable could cost
+         * macOS the process's identity (a launcher's Home button override): the app quits, and
+         * the change applies at the next start. The menu shows no Restart button there. */
+        puts("Runtime: no restart in the app; quitting (the change applies at the next start)");
+        fflush(NULL);
+        _exit(0);
+    }
     bb_close_from(3);
     execlp("bash", "bash", "run.sh", (char *)NULL);
     perror("runtime_restart: exec");
@@ -497,6 +506,9 @@ int main(int argc, char **argv) {
         if (bb_patches_scaled_sizes(argv[2],render,output)) printf("%dx%d %dx%d\n",render[0],render[1],output[0],output[1]);
         return 0;
     }
+#ifdef __APPLE__
+    bb_app_bundle_bootstrap(&argc, &argv); /* 13 Sentinels.app: what run-13s.sh would set up */
+#endif
     setvbuf(stdout, NULL, _IONBF, 0);
 #if !defined(_WIN32) && !defined(__APPLE__)
     /* Keep host heap objects handed to the guest (thread handles, TLS) in the

@@ -7,6 +7,7 @@
 #   S13_TIMEOUT   seconds before bb-probe stops itself (default 0: none); a backstop kill follows
 #                 30 s later
 # Extra arguments go to bb-probe, e.g. --headless (no GPU, no window).
+# src/app_bundle.c sets the same for 13 Sentinels.app (scripts/package-13s-app.sh): keep both in step.
 set -euo pipefail
 cd -- "$(dirname -- "$0")/.."
 game=${S13_GAME_DIR:?set S13_GAME_DIR to the game folder}

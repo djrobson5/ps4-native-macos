@@ -1070,6 +1070,9 @@ void Menu() {
     ImGui::SetCursorPosY(std::max(ImGui::GetCursorPosY(), help_top + ImGui::GetTextLineHeightWithSpacing() * 2.0f));
 
     const bool restart = RestartNeeded();
+    // A Mac app (BB_APP_BUNDLE, src/app_bundle.c) can't restart itself: the note stays, the
+    // player quits and starts again.
+    const bool restart_button = restart && !std::getenv("BB_APP_BUNDLE");
     if (restart) {
         ImGui::PushStyleColor(ImGuiCol_Text, Theme::Warning);
         ImGui::TextUnformatted(T("restart.note"));
@@ -1081,11 +1084,11 @@ void Menu() {
     const char* quit_label = T(quit_armed ? "menu.quitAgain" : "menu.quit");
     const float pad = ImGui::GetStyle().FramePadding.x * 2.0f;
     float buttons = ImGui::CalcTextSize(quit_label).x + ImGui::CalcTextSize(T("menu.close")).x + pad * 2.0f + S(8);
-    if (restart) {
+    if (restart_button) {
         buttons += ImGui::CalcTextSize(T("restart.button")).x + pad + S(8);
     }
     ImGui::SameLine(std::max(ImGui::GetCursorPosX(), ImGui::GetWindowContentRegionMax().x - buttons));
-    if (restart) {
+    if (restart_button) {
         ImGui::PushStyleColor(ImGuiCol_Button, Theme::Primary);
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Theme::PrimaryHover);
         if (ImGui::Button(T("restart.button"))) {

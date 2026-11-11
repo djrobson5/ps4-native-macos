@@ -84,7 +84,9 @@ static std::optional<std::filesystem::path> GetBundleParentDirectory() {
 }
 #endif
 
-static auto UserPaths = [] {
+// bbport: built on first use, not as a static initializer: a Mac app's bootstrap (probe.c) sets
+// BB_GPU_USER_DIR in main(), after the libraries' initializers have run.
+static std::unordered_map<PathType, fs::path> MakeUserPaths() {
     // bbport: the port keeps GPU caches where BB_GPU_USER_DIR points.
     const char* port_dir = std::getenv("BB_GPU_USER_DIR");
     auto user_dir = port_dir ? std::filesystem::path(port_dir) : std::filesystem::current_path() / PORTABLE_DIR;
@@ -151,7 +153,12 @@ static auto UserPaths = [] {
     }
 
     return paths;
-}();
+}
+
+static std::unordered_map<PathType, fs::path>& UserPaths() {
+    static auto paths = MakeUserPaths();
+    return paths;
+}
 
 bool ValidatePath(const fs::path& path) {
     if (path.empty()) {
@@ -180,7 +187,7 @@ std::string PathToUTF8String(const std::filesystem::path& path) {
 }
 
 const fs::path& GetUserPath(PathType shad_path) {
-    return UserPaths.at(shad_path);
+    return UserPaths().at(shad_path);
 }
 
 std::string GetUserPathString(PathType shad_path) {
@@ -194,7 +201,7 @@ void SetUserPath(PathType shad_path, const fs::path& new_path) {
         return;
     }
 
-    UserPaths.insert_or_assign(shad_path, new_path);
+    UserPaths().insert_or_assign(shad_path, new_path);
 }
 
 std::optional<fs::path> FindGameByID(const fs::path& dir, const std::string& game_id,
