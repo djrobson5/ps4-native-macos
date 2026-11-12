@@ -13,6 +13,7 @@
 #include "bbport_settings.h"
 #include "game_profile.h"
 #include "bbport_copy.h"
+#include "video_core/renderer_vulkan/vk_pipeline_ahead.h"
 #include <sys/resource.h>
 #include "bbport_free_check.h"
 #include "bbport_toggles.h"
@@ -421,6 +422,21 @@ extern "C" void bbgpu_patch_image(unsigned char* image, uint64_t size) {
     std::printf("Guest hooks: GX occlusion query guard %s\n",
                 BbGuestHooks::InstallGxQueryGuard() ? "in (bbport 0.7, the fault at 0x2169edc)"
                                                     : "not installed (BB_GX_QUERY_GUARD=0 or other code there)");
+}
+
+extern "C" void bbgpu_compile_status(const char* cache_dir, BbCompileStatus* out) {
+    const std::string system = Vulkan::PipelineSystem();
+    const Vulkan::CompileStatus status = Vulkan::EvaluateCompile(cache_dir, system);
+    *out = {};
+    out->due = status.due ? 1 : 0;
+    out->reason = Vulkan::CompileReasonName(status.reason);
+    out->built_states = status.built_states;
+    out->seen_states = status.seen_states;
+    out->new_states_for_a_run = status.new_states_for_a_run;
+    out->version = status.version;
+    out->built_version = status.built_version;
+    std::snprintf(out->built_for, sizeof(out->built_for), "%s", status.built_for.c_str());
+    std::snprintf(out->system, sizeof(out->system), "%s", status.system.c_str());
 }
 
 extern "C" unsigned bbgpu_symbol_count(void) {

@@ -94,6 +94,18 @@ void bbgpu_set_guest_image(const unsigned char *image, uint64_t size);
  * (its game profile, chosen by bbgpu_init) it installs the save thumbnail hook; for any other game it does
  * nothing. Call it after bbgpu_init. */
 void bbgpu_patch_image(unsigned char *image, uint64_t size);
+/* Whether Bloodborne's one-time shader compile step is due (the rule the game's own launch uses),
+ * read-only: `cache_dir` is the user folder's cache folder; nothing is created, written or
+ * initialized (no window, no device, no paths of the library). */
+typedef struct {
+    int due;                       /* 1: the step would run at the next launch with BB_SHADER_COMPILE */
+    const char *reason;            /* never_built | other_version | other_system | new_states | up_to_date */
+    uint32_t built_states, seen_states, new_states_for_a_run;
+    uint32_t version, built_version;
+    char built_for[256];           /* the system recorded by the finished step ("" none) */
+    char system[256];              /* the system now */
+} BbCompileStatus;
+void bbgpu_compile_status(const char *cache_dir, BbCompileStatus *out);
 /* Number of symbols registered by the vendored libraries (diagnostics). */
 unsigned bbgpu_symbol_count(void);
 #ifdef __cplusplus

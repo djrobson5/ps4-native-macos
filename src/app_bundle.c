@@ -442,6 +442,18 @@ static void prepare_with_run_sh(const char *contents, const char *exe, const cha
     (*out_args)[0] = (char *)argv0;
 }
 
+int bb_app_holds_bloodborne(void) {
+    char raw[PATH_MAX], exe[PATH_MAX];
+    uint32_t size = sizeof(raw);
+    if (_NSGetExecutablePath(raw, &size) != 0 || !realpath(raw, exe)) return 1;
+    char *macos = strstr(exe, ".app/Contents/MacOS/");
+    if (!macos) return 1; /* not an app: a developer's bb-probe */
+    char contents[PATH_MAX], id[32];
+    snprintf(contents, sizeof(contents), "%.*s.app/Contents", (int)(macos - exe), exe);
+    /* As the bootstrap reads it: an app without the key is 13 Sentinels. */
+    return plist_title_id(contents, id, sizeof(id)) && !strcmp(id, TITLE_BB.id);
+}
+
 void bb_app_bundle_bootstrap(int *argc, char ***argv) {
     /* Only an app's executable (…/Name.app/Contents/MacOS/…) without a game argument: `bb-probe
      * - --app0 …` or a boot file as the first argument is a developer's run and is left alone. A

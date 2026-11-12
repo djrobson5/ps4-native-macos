@@ -638,7 +638,12 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectPar
 
 void PipelineCache::NoteForCompile(const PipelineSelection& selection) {
     constexpr u32 vertex = u32(SwStage::Vertex), fragment = u32(SwStage::Fragment);
-    static const bool wanted = std::getenv("BB_SHADER_COMPILE") != nullptr;
+    // BB_SHADER_NOTE=1 records without ever starting the step (the launcher's way to keep the
+    // list of states growing while the step runs only when the player asks for it).
+    static const bool wanted = [] {
+        const char* note = std::getenv("BB_SHADER_NOTE");
+        return std::getenv("BB_SHADER_COMPILE") != nullptr || (note && !std::strcmp(note, "1"));
+    }();
     if (!wanted || !device.GetCapabilities().free_colour || !selection.infos[vertex] ||
         selection.graphics_key.fixed_quad_outer) {
         return;
@@ -1325,24 +1330,6 @@ bool PipelineCache::RefreshComputeKey() {
 // bbport: BB_SHADER_LOG=1 (N2.5): one line per new shader variant, with its conversion time; for a
 // program's first variant a summary of what it is specialized for, for a later one which parts
 // differ from the first (what an ahead-of-time conversion would have to predict).
-/// bbport: the system the compile step built its pipelines for (the macOS build and the Mac
-/// model). Metal's pipeline archive is unusable after a macOS update or on another Mac and is
-/// started over (mtl_pso_cache.mm), so the step runs again when this changes.
-static std::string PipelineSystem() {
-    std::string stamp;
-#ifdef __APPLE__
-    for (const char* name : {"kern.osversion", "hw.model"}) {
-        char value[128]{};
-        size_t size = sizeof(value) - 1;
-        if (sysctlbyname(name, value, &size, nullptr, 0) == 0) {
-            stamp += stamp.empty() ? "" : "/";
-            stamp += value;
-        }
-    }
-#endif
-    return stamp;
-}
-
 static bool ShaderLogOn() {
     static const bool on = [] {
         const char* env = std::getenv("BB_SHADER_LOG");
@@ -1786,28 +1773,21 @@ void PipelineCache::CompileAhead() {
     started = true;
     {
         // Compiled by an earlier launch of this version. A later session's pipelines bring the step
-        // back only with several new states: a run takes minutes, and most new pipelines reuse
-        // states the step has already built.
-        constexpr u32 new_states_for_a_run = 4;
+        // back only with several new states (NewStatesForARun): a run takes minutes, and most new
+        // pipelines reuse states the step has already built. The rule is EvaluateCompile's, which
+        // the launcher's --compile-status asks too.
         const auto cache = Common::FS::GetUserPath(Common::FS::PathType::CacheDir);
-        u32 version = 0, built = 0;
-        std::string system;
-        std::ifstream(cache / "pipelines-ahead.complete") >> built >> system;
         const std::string current = PipelineSystem();
-        if (built && system.empty()) {
-            // Written before the system was recorded (0.9.5): taken as this system.
-            std::ofstream(cache / "pipelines-ahead.complete") << built << ' ' << current;
-            system = current;
+        const CompileStatus status = EvaluateCompile(cache, current);
+        if (status.migrated) {
+            std::ofstream(cache / "pipelines-ahead.complete") << status.built_states << ' ' << current;
         }
-        const u32 states = CountStates(ReadNotedPipelines(cache / "pipelines-seen.bin"));
-        if (std::ifstream(cache / "shaders-ahead.txt.complete") >> version;
-            version == Serialization::ShaderBinaryVersion && system == current &&
-            states < built + new_states_for_a_run) {
+        if (!status.due) {
             return;
         }
-        if (built && system != current) {
+        if (status.built_states && status.built_for != current) {
             std::printf("Pipeline compile: built for %s, this is %s (a macOS update or another "
-                        "Mac): building again\n", system.c_str(), current.c_str());
+                        "Mac): building again\n", status.built_for.c_str(), current.c_str());
         }
     }
     static std::atomic<bool> finished{false};

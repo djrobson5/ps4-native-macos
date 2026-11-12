@@ -17,4 +17,8 @@ void bb_app_bundle_bootstrap(int *argc, char ***argv);
 /* Called before anything else: with BB_LAUNCH_DUMP set and `-` as the first argument, writes the
  * launch to that file and exits. */
 void bb_app_launch_dump(int argc, char **argv);
+/* 1 when this executable holds Bloodborne: an app whose Info.plist's BBTitleID is CUSA03173, or a
+ * program that is not in an app at all (a developer's bb-probe). 0 for 13 Sentinels' app (and
+ * any other title's). Reads the Info.plist only (--compile-status). */
+int bb_app_holds_bloodborne(void);
 #endif

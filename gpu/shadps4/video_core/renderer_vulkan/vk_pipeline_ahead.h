@@ -7,6 +7,7 @@
 
 #include <filesystem>
 #include <span>
+#include <string>
 #include <vector>
 
 #include "video_core/renderer_vulkan/vk_pipeline_key.h"
@@ -40,5 +41,44 @@ u32 CountStates(std::span<const AheadPipeline> seen);
 std::vector<AheadPipeline> PlanPipelines(const ShaderScan& scan, std::span<const AheadPipeline> seen);
 /// Prints how many of `seen` the rules alone plan (BB_PIPELINE_PLAN_CHECK).
 void CheckPlan(const ShaderScan& scan, std::span<const AheadPipeline> seen);
+
+/// The system the compile step built its pipelines for (the macOS build and the Mac model).
+/// Metal's pipeline archive is unusable after a macOS update or on another Mac and is started
+/// over (mtl_pso_cache.mm), so the step runs again when this changes. Empty off macOS.
+std::string PipelineSystem();
+
+/// A later session's pipelines bring the step back only with this many new states: a run takes
+/// minutes, and most new pipelines reuse states the step has already built.
+constexpr u32 NewStatesForARun = 4;
+
+/// Why the compile step is or is not due.
+enum class CompileReason {
+    NeverBuilt,   ///< the step has not finished here (no record of it)
+    OtherVersion, ///< finished by another version of the shader binary format
+    OtherSystem,  ///< finished on another macOS build or Mac
+    NewStates,    ///< finished, but play has met enough new states since
+    UpToDate,     ///< finished and nothing new: not due
+};
+const char* CompileReasonName(CompileReason reason);
+
+struct CompileStatus {
+    bool due{};
+    CompileReason reason{CompileReason::NeverBuilt};
+    u32 built_states{};          ///< the states the finished step built (pipelines-ahead.complete)
+    u32 seen_states{};           ///< the states play has noted (pipelines-seen.bin)
+    u32 new_states_for_a_run{NewStatesForARun};
+    std::string built_for;       ///< the system recorded by the finished step (empty: none)
+    std::string system;          ///< the system now
+    u32 version{};               ///< the shader binary version now
+    u32 built_version{};         ///< the version recorded by the finished step (0: none)
+    bool migrated{};             ///< built_for was empty with states built (0.9.5): taken as `system`
+};
+
+/// The one rule of whether the compile step is due, read-only: the folder is the user's cache
+/// folder, `system` the current PipelineSystem(). Due unless shaders-ahead.txt.complete holds this
+/// version, pipelines-ahead.complete this system, and the session notes hold fewer than
+/// NewStatesForARun states over those built. A record from 0.9.5 (states, no system) is taken as
+/// this system (`migrated`); rewriting it is the caller's, not done here.
+CompileStatus EvaluateCompile(const std::filesystem::path& cache, const std::string& system);
 
 } // namespace Vulkan

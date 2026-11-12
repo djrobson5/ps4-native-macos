@@ -15,6 +15,9 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#ifdef __APPLE__
+#include <sys/sysctl.h>
+#endif
 #include <fmt/format.h>
 #include <xxhash.h>
 
@@ -852,6 +855,68 @@ u32 CountStates(std::span<const AheadPipeline> seen) {
         states.insert(StateOf(pipeline.key));
     }
     return u32(states.size());
+}
+
+std::string PipelineSystem() {
+    std::string stamp;
+#ifdef __APPLE__
+    for (const char* name : {"kern.osversion", "hw.model"}) {
+        char value[128]{};
+        size_t size = sizeof(value) - 1;
+        if (sysctlbyname(name, value, &size, nullptr, 0) == 0) {
+            stamp += stamp.empty() ? "" : "/";
+            stamp += value;
+        }
+    }
+#endif
+    return stamp;
+}
+
+const char* CompileReasonName(CompileReason reason) {
+    switch (reason) {
+    case CompileReason::NeverBuilt:
+        return "never_built";
+    case CompileReason::OtherVersion:
+        return "other_version";
+    case CompileReason::OtherSystem:
+        return "other_system";
+    case CompileReason::NewStates:
+        return "new_states";
+    case CompileReason::UpToDate:
+        return "up_to_date";
+    }
+    return "up_to_date";
+}
+
+CompileStatus EvaluateCompile(const std::filesystem::path& cache, const std::string& system) {
+    CompileStatus status;
+    status.system = system;
+    status.version = Serialization::ShaderBinaryVersion;
+    std::ifstream(cache / "pipelines-ahead.complete") >> status.built_states >> status.built_for;
+    if (status.built_states && status.built_for.empty()) {
+        // Written before the system was recorded (0.9.5): taken as this system.
+        status.built_for = system;
+        status.migrated = true;
+    }
+    status.seen_states = CountStates(ReadNotedPipelines(cache / "pipelines-seen.bin"));
+    std::ifstream(cache / "shaders-ahead.txt.complete") >> status.built_version;
+    const bool current = status.built_version == status.version && status.built_for == system &&
+                         status.seen_states < status.built_states + status.new_states_for_a_run;
+    status.due = !current;
+    if (current) {
+        status.reason = CompileReason::UpToDate;
+    } else if (status.built_version == 0) {
+        status.reason = CompileReason::NeverBuilt;
+    } else if (status.built_version != status.version) {
+        status.reason = CompileReason::OtherVersion;
+    } else if (status.built_for.empty() && status.built_states == 0) {
+        status.reason = CompileReason::NeverBuilt; // the pipelines half has no record
+    } else if (status.built_for != system) {
+        status.reason = CompileReason::OtherSystem;
+    } else {
+        status.reason = CompileReason::NewStates;
+    }
+    return status;
 }
 
 std::vector<AheadPipeline> PlanPipelines(const ShaderScan& scan, std::span<const AheadPipeline> seen) {

@@ -12,6 +12,7 @@
 #include "runtime_patches.h"
 #include "runtime_prepare.h"
 #include "app_bundle.h"
+#include "compile_status.h"
 #include "cpu/bbcpu.h"
 #include "gpu/bbgpu.h"
 #if !(defined(__x86_64__) || (defined(__aarch64__) && defined(__APPLE__))) || !defined(__GNUC__)
@@ -508,6 +509,19 @@ int main(int argc, char **argv) {
         int render[2], output[2];
         if (bb_patches_scaled_sizes(argv[2],render,output)) printf("%dx%d %dx%d\n",render[0],render[1],output[0],output[1]);
         return 0;
+    }
+    /* --compile-status DATA_DIR (the launcher's question, also asked of an app's executable): is
+     * Bloodborne's shader compile step due? One line of JSON; nothing is opened, created or run. */
+    if (argc >= 2 && !strcmp(argv[1], "--compile-status")) {
+        if (argc != 3) {
+            fprintf(stderr, "Usage: %s --compile-status <data dir>\n", argv[0]);
+            return 2;
+        }
+#ifdef __APPLE__
+        return bb_compile_status(argv[2], bb_app_holds_bloodborne());
+#else
+        return bb_compile_status(argv[2], 1);
+#endif
     }
 #ifdef __APPLE__
     bb_app_bundle_bootstrap(&argc, &argv); /* an app's start: 13 Sentinels.app, Bloodborne.app */

@@ -152,7 +152,7 @@ endif()
 
 # The game: src/runtime*.c are its services, probe.c the program.
 file(GLOB BB_RUNTIME_SOURCES CONFIGURE_DEPENDS src/runtime*.c)
-add_executable(bbprobe src/probe.c src/app_bundle.c ${BB_RUNTIME_SOURCES} src/platform.c src/vulkan_smoke.c)
+add_executable(bbprobe src/probe.c src/app_bundle.c src/compile_status.c ${BB_RUNTIME_SOURCES} src/platform.c src/vulkan_smoke.c)
 target_link_libraries(bbprobe PRIVATE bb-runtime)
 if (NOT APPLE)
     # -no-pie keeps the loader and its brk heap below 1 TiB; -rdynamic lets the GPU library find
@@ -336,6 +336,8 @@ if (BUILD_TESTING)
     if (APPLE)
         add_test(NAME launch-dump
                  COMMAND bash ${CMAKE_SOURCE_DIR}/tests/test_launch_dump.sh $<TARGET_FILE:bbprobe>)
+        add_test(NAME compile-status
+                 COMMAND bash ${CMAKE_SOURCE_DIR}/tests/test_compile_status.sh $<TARGET_FILE:bbprobe>)
         add_test(NAME app-launch-equality
                  COMMAND bash ${CMAKE_SOURCE_DIR}/tests/app_launch_equality.sh
                  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
