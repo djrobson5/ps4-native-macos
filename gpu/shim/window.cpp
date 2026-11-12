@@ -134,10 +134,23 @@ SDL_DisplayID ChooseDisplay() {
 }
 
 // The monitor the window is on, in pixels: the output's aspect ratio "Auto" follows it (bbport 0.6).
+// On macOS it is the area a fullscreen window gets: below a camera notch, not the whole panel, so
+// "Auto" fills the screen instead of being shrunk to fit with bars at the sides.
 void TellMonitor(SDL_Window* window) {
     if (const SDL_DisplayMode* mode = SDL_GetDesktopDisplayMode(SDL_GetDisplayForWindow(window))) {
         const float density = mode->pixel_density > 0.0f ? mode->pixel_density : 1.0f;
-        BbSettings::SetMonitor(int(mode->w * density + 0.5f), int(mode->h * density + 0.5f));
+        double w = mode->w, h = mode->h;
+#if defined(__APPLE__) && TARGET_OS_OSX
+        double inset_w = 0, inset_h = 0;
+        BbMacMenu::ScreenInsets(SDL_GetPointerProperty(SDL_GetWindowProperties(window),
+                                                       SDL_PROP_WINDOW_COCOA_WINDOW_POINTER, nullptr),
+                                &inset_w, &inset_h);
+        if (inset_w < w && inset_h < h) {
+            w -= inset_w;
+            h -= inset_h;
+        }
+#endif
+        BbSettings::SetMonitor(int(w * density + 0.5), int(h * density + 0.5));
     }
 }
 

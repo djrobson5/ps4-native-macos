@@ -11,6 +11,7 @@
 #if TARGET_OS_OSX
 #import <Cocoa/Cocoa.h>
 
+#include <algorithm>
 #include <cstdio>
 
 #include "bbport_mac_menu.h"
@@ -36,6 +37,19 @@ void BbMacMenu::ClearCommandShortcuts() {
             std::printf("Window: %u Command shortcuts taken off the menu bar\n",
                         ClearShortcuts(menu));
         }
+    }
+}
+
+void BbMacMenu::ScreenInsets(void* ns_window, double* horizontal, double* vertical) {
+    *horizontal = 0;
+    *vertical = 0;
+    @autoreleasepool {
+        NSWindow* window = (__bridge NSWindow*)ns_window;
+        NSScreen* screen = window.screen ? window.screen : NSScreen.mainScreen;
+        if (!screen) return;
+        const NSEdgeInsets insets = screen.safeAreaInsets;
+        *horizontal = std::max(0.0, double(insets.left)) + std::max(0.0, double(insets.right));
+        *vertical = std::max(0.0, double(insets.top)) + std::max(0.0, double(insets.bottom));
     }
 }
 #endif
