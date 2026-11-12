@@ -1783,7 +1783,16 @@ void PipelineCache::CompileAhead() {
             std::ofstream(cache / "pipelines-ahead.complete") << status.built_states << ' ' << current;
         }
         if (!status.due) {
-            return;
+            // BB_SHADER_COMPILE_FORCE=1 (the launcher's "compile now", Bloodborne.app
+            // --compile-shaders): the step runs though nothing says it is due. It still skips what
+            // an earlier run compiled, so it is quick when little is missing.
+            const char* force = std::getenv("BB_SHADER_COMPILE_FORCE");
+            if (!force || std::strcmp(force, "1") != 0) {
+                return;
+            }
+            std::printf("Shader compile: forced (BB_SHADER_COMPILE_FORCE=1), though not due (%s)\n",
+                        CompileReasonName(status.reason));
+            std::fflush(stdout);
         }
         if (status.built_states && status.built_for != current) {
             std::printf("Pipeline compile: built for %s, this is %s (a macOS update or another "

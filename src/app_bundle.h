@@ -11,7 +11,13 @@
  * (S13_APP_DRY_RUN=1 is its older dry run). Bloodborne: runs the bundle's run.sh once, which the
  * probe answers with its arguments, environment and directory instead of starting the game
  * (bb_app_launch_dump), and takes those over. Anything else (a developer's `bb-probe - --app0 …`)
- * is left alone. */
+ * is left alone.
+ * Bloodborne also: on the Metal renderer BB_SHADER_NOTE=1 is set unless the environment has it (play
+ * records the pipeline states the shader compile step builds from). The argument --compile-shaders
+ * (Bloodborne.app only, taken out of the arguments the game gets) sets BB_SHADER_COMPILE=1,
+ * BB_SHADER_COMPILE_EXIT=1 and BB_SHADER_COMPILE_FORCE=1 and otherwise starts as usual, so the window shows
+ * the step and the process ends after it. Refused with a message on stderr and nothing started: exit 3
+ * (this app holds 13 Sentinels), exit 4 (the renderer is MoltenVK, or not Metal for another reason). */
 #ifdef __APPLE__
 void bb_app_bundle_bootstrap(int *argc, char ***argv);
 /* Called before anything else: with BB_LAUNCH_DUMP set and `-` as the first argument, writes the

@@ -36,6 +36,12 @@ extern char **environ;
 #define APP_LOGS_KEPT 20
 #define APP_DUMP_MAGIC "BBLAUNCH1"
 
+/* `--compile-shaders` (Bloodborne.app only): the shader compile step, forced, then the process ends.
+ * What it refuses, with the exit codes a launcher can tell apart (1 is any other failure of the
+ * start, 2 is --compile-status's usage error): */
+#define APP_EXIT_COMPILE_NOT_BLOODBORNE 3 /* the app holds another game (13 Sentinels) */
+#define APP_EXIT_COMPILE_NOT_METAL 4      /* the renderer is MoltenVK (or the process would not use Metal) */
+
 /* The two games an app can hold (the Info.plist's BBTitleID). */
 typedef struct {
     const char *id;         /* BBTitleID, and the game's folder beside the app */
@@ -46,6 +52,7 @@ typedef struct {
 static const Title TITLE_13S = {"CUSA19610", "13 Sentinels", "S13_APP_DATA_DIR", 0};
 static const Title TITLE_BB = {"CUSA03173", "Bloodborne", "BB_APP_DATA_DIR", 1};
 static const Title *title = &TITLE_13S;
+static int orig_stderr = -1; /* the terminal's stderr, kept when the output moves to the log */
 static int dry_run; /* BB_APP_DRY_RUN=1 (or S13_APP_DRY_RUN=1 for 13 Sentinels): nothing opens, nothing is asked */
 
 static int make_dir(const char *path) {
@@ -148,6 +155,25 @@ static void set_default(const char *name, const char *value) {
 }
 static void set_always(const char *name, const char *value) {
     setenv(name, value, 1); /* run-13s.sh exports these outright */
+}
+
+/* Whether Bloodborne would draw with the Metal renderer, as run.sh decides it: not under another
+ * Vulkan driver or an x86-64 process; otherwise BB_METAL_FRAME when set (an empty one is run.sh's
+ * default, 1), else what wayfarer.cfg's renderer says (set_default below gives the environment's
+ * value precedence over it). */
+static int bloodborne_uses_metal(const char *renderer) {
+    const char *driver = getenv("BB_VK_DRIVER"), *arch = getenv("BB_ARCH"), *frame = getenv("BB_METAL_FRAME");
+    if ((driver && *driver) || (arch && !strcmp(arch, "x86_64"))) return 0;
+    if (frame) return !*frame || !strcmp(frame, "1");
+    return strcmp(renderer, "moltenvk") != 0;
+}
+
+/* A refused --compile-shaders: the message on the terminal's stderr (the log may have taken it
+ * over), and the code. Nothing was launched. */
+static void compile_refused(int code, const char *message) {
+    if (orig_stderr >= 0) dprintf(orig_stderr, "App: --compile-shaders: %s\n", message);
+    else fprintf(stderr, "App: --compile-shaders: %s\n", message);
+    exit(code);
 }
 
 static int newer_first(const struct dirent **a, const struct dirent **b) {
@@ -334,10 +360,11 @@ static int dry_run_variable(const char *entry) {
 }
 /* The dry run of the new kind (BB_APP_DRY_RUN=1): what the launch is, by the variables that matter,
  * sorted so two runs can be compared. */
-static void print_dry_run(const char *app, const char *data, char **args, int count) {
+static void print_dry_run(const char *app, const char *data, char **args, int count, const char *cwd) {
     printf("App: %s\nApp: data %s\nApp: title %s\nApp: arguments:", app, data, title->id);
     for (int i = 0; i < count; ++i) printf(" [%s]", args[i]);
     printf("\n");
+    if (title->bloodborne && cwd) printf("App: directory %s\n", cwd); /* 13 Sentinels' dry run stays as it was */
     const char *shown[16384];
     int n = 0;
     for (char **e = environ; e && *e && n < 16384; ++e)
@@ -467,11 +494,17 @@ void bb_app_bundle_bootstrap(int *argc, char ***argv) {
     /* AppKit's own arguments (-psn_…, -ApplePersistenceIgnoreState YES, -NSDocumentRevisionsDebugMode YES):
      * one dash and a name, perhaps a value. They are left out of bb-probe's arguments. */
     static char *given[64];
-    int given_count = 0;
+    int given_count = 0, compile_shaders = 0;
     for (int i = 1; i < *argc; ++i) {
         const char *arg = (*argv)[i];
         if (arg[0] == '-' && arg[1] && arg[1] != '-') {
             if (i + 1 < *argc && (*argv)[i + 1][0] != '-') ++i;
+            continue;
+        }
+        /* The app's own argument: it is not the game's, so it is taken out here and run.sh (and the
+         * game) see the arguments of a normal start. */
+        if (!strcmp(arg, "--compile-shaders")) {
+            compile_shaders = 1;
             continue;
         }
         if (given_count == 0 && strncmp(arg, "--", 2) != 0) return; /* `-` or a boot file: a developer's run */
@@ -493,6 +526,10 @@ void bb_app_bundle_bootstrap(int *argc, char ***argv) {
             fprintf(stderr, "App: the Info.plist's BBTitleID is %s: not a title this program knows\n", id);
             exit(1);
         }
+    }
+    if (compile_shaders && !title->bloodborne) {
+        compile_refused(APP_EXIT_COMPILE_NOT_BLOODBORNE,
+                        "this app is not Bloodborne's: only Bloodborne has a shader compile step.");
     }
     const char *dry_choice = getenv("BB_APP_DRY_RUN");
     const char *dry_legacy = title->bloodborne ? NULL : getenv("S13_APP_DRY_RUN"); /* 13 Sentinels' older switch: its older output */
@@ -593,6 +630,21 @@ void bb_app_bundle_bootstrap(int *argc, char ***argv) {
         /* run.sh's own defaults stand (Metal, windowed per bbport.ini): only what the cfg says. */
         if (*renderer) set_default("BB_METAL_FRAME", !strcmp(renderer, "metal") ? "1" : "0");
         if (fullscreen >= 0) set_default("BB_FULLSCREEN", fullscreen ? "1" : "0");
+        const int metal = bloodborne_uses_metal(renderer);
+        if (compile_shaders && !metal) {
+            compile_refused(APP_EXIT_COMPILE_NOT_METAL,
+                            "the renderer is MoltenVK; the compile step is for the Metal renderer (wayfarer.cfg renderer=metal, "
+                            "BB_METAL_FRAME unset or 1, no BB_VK_DRIVER).");
+        }
+        /* Metal: play records the pipeline states the compile step builds from (it never starts the
+         * step: only BB_SHADER_COMPILE does). */
+        if (metal) set_default("BB_SHADER_NOTE", "1");
+        /* The step, forced (even if nothing says it is due), and the process ends after it. */
+        if (compile_shaders) {
+            set_always("BB_SHADER_COMPILE", "1");
+            set_always("BB_SHADER_COMPILE_EXIT", "1");
+            set_always("BB_SHADER_COMPILE_FORCE", "1");
+        }
     }
     /* The options both games have; a variable the environment already has wins, and nothing is set
      * for a key that is absent (or 0 where 0 is the default). */
@@ -658,11 +710,13 @@ void bb_app_bundle_bootstrap(int *argc, char ***argv) {
             exit(0);
         }
         if (dry_run) {
-            print_dry_run(app, data, args, n);
+            print_dry_run(app, data, args, n, data);
             exit(0);
         }
     }
     if (log_fd >= 0) {
+        orig_stderr = dup(STDERR_FILENO);
+        if (orig_stderr >= 0) fcntl(orig_stderr, F_SETFD, FD_CLOEXEC);
         dup2(log_fd, STDOUT_FILENO);
         dup2(log_fd, STDERR_FILENO);
         close(log_fd);
@@ -676,8 +730,11 @@ void bb_app_bundle_bootstrap(int *argc, char ***argv) {
         prepare_with_run_sh(contents, exe, (*argv)[0], game, data, user, config, given, given_count,
                             use_log ? log : NULL, &args, &n, run_cwd, sizeof(run_cwd));
         setenv("BB_APP_BUNDLE", "1", 1);
+        /* What run.sh ended on wins over what was guessed before it ran. */
+        if (compile_shaders && (!getenv("BB_METAL_FRAME") || strcmp(getenv("BB_METAL_FRAME"), "1") != 0))
+            compile_refused(APP_EXIT_COMPILE_NOT_METAL, "run.sh chose a renderer other than Metal (BB_METAL_FRAME is not 1).");
         if (dry_run) {
-            print_dry_run(app, data, args, n);
+            print_dry_run(app, data, args, n, run_cwd);
             exit(0);
         }
     }
