@@ -1,5 +1,14 @@
 # bloodborne-runtime
 
+> **This fork, [djrobson5/ps4-native-macos](https://github.com/djrobson5/ps4-native-macos)**
+> (branch `13-sentinels`), runs two PS4 games natively on Apple Silicon Macs with this runtime:
+> Bloodborne, as upstream does, and **13 Sentinels: Aegis Rim** (CUSA19610 1.00), which it adds.
+> It also carries the scripts a launcher uses to check a player's own game, unpack a fake PKG and
+> package an app (`scripts/game_check_13s.py`, `scripts/pkg_extract.py`,
+> `scripts/package-13s-app.sh`); the maintainer's own launcher, Wayfarer (not public), installs and
+> updates from this branch. Bring your own game: no game files or console keys are in this
+> repository. Everything below is upstream's README.
+
 [![Discord](https://img.shields.io/badge/Discord-join%20the%20server-5865F2?logo=discord&logoColor=white)](https://discord.gg/QS6vHz45xA)
 
 What stands in for a PS4 while Bloodborne (CUSA03173 1.09) runs: it loads the game's executable,
