@@ -1,12 +1,20 @@
 #pragma once
 /* A Mac app's start (app_bundle.c). When the executable sits in an app's Contents/MacOS and its
- * arguments are only flags (or none): makes the data folder (S13_APP_DATA_DIR, else
- * ~/Library/Application Support/13 Sentinels), reads its wayfarer.cfg (renderer=metal|moltenvk,
- * fullscreen=0|1), sets what scripts/run-13s.sh sets where the environment doesn't already, sends
- * the output to logs/<date>.log (S13_APP_LOG=- keeps it on the terminal), changes to the data
- * folder and replaces the arguments with `- --app0 <app's folder>/CUSA19610 --user <data>/user
- * --timeout 0` plus the flags given. S13_APP_DRY_RUN=1 prints the result and exits. Anything else
- * (a developer's `bb-probe - --app0 …`) is left alone. */
+ * arguments are only flags (or none), the launch is prepared from the Info.plist's BBTitleID
+ * (CUSA19610: 13 Sentinels, the default; CUSA03173: Bloodborne). Both: the game's folder is
+ * <the app's folder>/<title id>, the data folder is ~/Library/Application Support/<name>
+ * (S13_APP_DATA_DIR / BB_APP_DATA_DIR), wayfarer.cfg there is read (renderer, fullscreen, display,
+ * vsync, fps_mode, fps_limit, metal_hud, frame_log), the output goes to logs/<date>.log
+ * (BB_APP_LOG=- keeps it on the terminal), and BB_APP_DRY_RUN=1 prints the result and exits.
+ * 13 Sentinels: sets what scripts/run-13s.sh sets where the environment doesn't already and the
+ * arguments `- --app0 <game> --user <data>/user --timeout 0` plus the flags given
+ * (S13_APP_DRY_RUN=1 is its older dry run). Bloodborne: runs the bundle's run.sh once, which the
+ * probe answers with its arguments, environment and directory instead of starting the game
+ * (bb_app_launch_dump), and takes those over. Anything else (a developer's `bb-probe - --app0 …`)
+ * is left alone. */
 #ifdef __APPLE__
 void bb_app_bundle_bootstrap(int *argc, char ***argv);
+/* Called before anything else: with BB_LAUNCH_DUMP set and `-` as the first argument, writes the
+ * launch to that file and exits. */
+void bb_app_launch_dump(int argc, char **argv);
 #endif

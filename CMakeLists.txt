@@ -325,6 +325,21 @@ if (BUILD_TESTING)
         # 'cryptography' package and is skipped without it).
         add_test(NAME game-check-13s COMMAND Python3::Interpreter -I
                  ${CMAKE_SOURCE_DIR}/tests/test_game_check_13s.py)
+        add_test(NAME game-check-bb COMMAND Python3::Interpreter -I
+                 ${CMAKE_SOURCE_DIR}/tests/test_game_check_bb.py)
+    endif()
+
+    # The app's launch (src/app_bundle.c). The dump the probe writes for run.sh's last line needs
+    # no game; the equality check (Bloodborne.app's launch against run.sh's own, in a scratch
+    # folder) packages both apps and needs a Bloodborne game folder in BB_TEST_GAME: without it
+    # it skips (exit code 77).
+    if (APPLE)
+        add_test(NAME launch-dump
+                 COMMAND bash ${CMAKE_SOURCE_DIR}/tests/test_launch_dump.sh $<TARGET_FILE:bbprobe>)
+        add_test(NAME app-launch-equality
+                 COMMAND bash ${CMAKE_SOURCE_DIR}/tests/app_launch_equality.sh
+                 WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+        set_tests_properties(app-launch-equality PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 900)
     endif()
 
     # The loader test builds a guest image with 4 KiB pages; macOS has 16 KiB ones.

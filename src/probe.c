@@ -499,6 +499,9 @@ static void *game_thread(void *unused) {
 #endif
 
 int main(int argc, char **argv) {
+#ifdef __APPLE__
+    bb_app_launch_dump(argc, argv); /* Bloodborne.app: run.sh's last step, written to a file instead of exec'd */
+#endif
     /* --print-scaled SETTINGS (run.sh, before starting): the render and output sizes bbport.ini
      * selects, "RENDER OUTPUT" (WxH), or nothing at native 1080p (runtime_patches.c). */
     if (argc==3 && !strcmp(argv[1],"--print-scaled")) {
@@ -507,7 +510,7 @@ int main(int argc, char **argv) {
         return 0;
     }
 #ifdef __APPLE__
-    bb_app_bundle_bootstrap(&argc, &argv); /* 13 Sentinels.app: what run-13s.sh would set up */
+    bb_app_bundle_bootstrap(&argc, &argv); /* an app's start: 13 Sentinels.app, Bloodborne.app */
 #endif
     setvbuf(stdout, NULL, _IONBF, 0);
 #if !defined(_WIN32) && !defined(__APPLE__)

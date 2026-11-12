@@ -229,16 +229,18 @@ def check_pkg(path, info, eboot):
     return check_pkg_eboot(path, info)
 
 
-def check_pkg_eboot(path, info):
-    """Unpacks eboot.bin alone into a temporary folder and compares its loaded image."""
+def pkg_image(path, info):
+    """Unpacks eboot.bin alone from a PKG into a temporary folder (deleted after) and hashes its
+    loaded image: (image, None), or (None, the refusal) when it cannot be done. Shared with
+    game_check_bb.py."""
     try:
         import cryptography  # noqa: F401
         import pkg_extract
     except (ImportError, SystemExit):  # pkg_extract exits when it cannot import cryptography
-        return refuse(info, 'needs_cryptography',
-                      "Checking the PKG's eboot.bin needs the 'cryptography' Python package: "
-                      "install it into a virtual environment (python3 -m venv <dir> && "
-                      "<dir>/bin/pip install cryptography) and run this with <dir>/bin/python3.")
+        return None, refuse(info, 'needs_cryptography',
+                            "Checking the PKG's eboot.bin needs the 'cryptography' Python package: "
+                            "install it into a virtual environment (python3 -m venv <dir> && "
+                            "<dir>/bin/pip install cryptography) and run this with <dir>/bin/python3.")
     temp = tempfile.mkdtemp(prefix='13s-eboot.')
     package = None
     try:
@@ -246,19 +248,27 @@ def check_pkg_eboot(path, info):
             package = pkg_extract.Pkg(str(path))
             pkg_extract.extract(package, temp, only=['eboot.bin'])
             if not (Path(temp) / 'eboot.bin').is_file():
-                return refuse(info, 'not_a_game',
-                              'The PKG holds no eboot.bin: it is not the game. Pick the game\'s '
-                              'PKG or its dumped folder.')
+                return None, refuse(info, 'not_a_game',
+                                    'The PKG holds no eboot.bin: it is not the game. Pick the game\'s '
+                                    'PKG or its dumped folder.')
             image = game_check.image_sha256(temp)
         except Exception as error:
-            return refuse(info, 'unreadable',
-                          f"The PKG's eboot.bin could not be unpacked ({error}): download or copy "
-                          f"the PKG again.")
+            return None, refuse(info, 'unreadable',
+                                f"The PKG's eboot.bin could not be unpacked ({error}): download or copy "
+                                f"the PKG again.")
     finally:
         if package is not None:
             package.f.close()
         shutil.rmtree(temp, ignore_errors=True)
     info['image_checked'] = True
+    return image, None
+
+
+def check_pkg_eboot(path, info):
+    """Unpacks eboot.bin alone into a temporary folder and compares its loaded image."""
+    image, refused = pkg_image(path, info)
+    if refused:
+        return refused
     if image != SUPPORTED_IMAGE_13S:
         return refuse(info, 'wrong_eboot',
                       f'The PKG says {found(info)} but its eboot.bin is not that game\'s executable '
@@ -283,18 +293,22 @@ def default_data_dir():
                 or Path.home() / 'Library' / 'Application Support' / '13 Sentinels')
 
 
-def pick_icon(game_dirs, data_dir=None):
-    """The picture for the app's icon: the first sce_sys/icon0.png among the game folders, else the
-    most recently modified save icon (<data>/user/savedata/*/CUSA19610/SAVEDATA*.sce_sys/icon0.png),
-    else None."""
+def find_icon(game_dirs, data, title_id, slot='SAVEDATA*'):
+    """The first sce_sys/icon0.png among the game folders, else the most recently modified save icon
+    (<data>/user/savedata/*/<title id>/<slot>.sce_sys/icon0.png), else None. Shared with game_check_bb.py."""
     for folder in game_dirs:
         icon = Path(folder) / 'sce_sys' / 'icon0.png'
         if icon.is_file():
             return icon
-    data = Path(data_dir) if data_dir else default_data_dir()
-    pattern = glob.escape(str(data)) + f'/user/savedata/*/{SUPPORTED_TITLE}/SAVEDATA*.sce_sys/icon0.png'
+    pattern = glob.escape(str(data)) + f'/user/savedata/*/{title_id}/{slot}.sce_sys/icon0.png'
     icons = [Path(p) for p in glob.glob(pattern) if os.path.isfile(p)]
     return max(icons, key=lambda p: (p.stat().st_mtime, str(p)), default=None)
+
+
+def pick_icon(game_dirs, data_dir=None):
+    """The picture for the app's icon: the first sce_sys/icon0.png among the game folders, else the
+    most recently modified save icon of the game, else None."""
+    return find_icon(game_dirs, Path(data_dir) if data_dir else default_data_dir(), SUPPORTED_TITLE)
 
 
 def main(argv=None):

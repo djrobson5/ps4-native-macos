@@ -6,6 +6,7 @@
       "id": 0,
       "grade": "platinum",
       "group": "base",
+      "icon_url": "https://image.api.playstation.com/trophy/np/NPWR05818_00_00347A646D41E9660F4153AD7A0274E2BC597C5A27/B201254EA5AB07FE42D25FF799A7AF9AE8274A6C.PNG",
       "translations": {
         "en": {
           "name": "Bloodborne",
@@ -61,6 +62,7 @@
       "id": 1,
       "grade": "gold",
       "group": "base",
+      "icon_url": "https://image.api.playstation.com/trophy/np/NPWR05818_00_00347A646D41E9660F4153AD7A0274E2BC597C5A27/7E858ADC4B890F980B15EC53F5D6E0FB55DD24D7.PNG",
       "translations": {
         "en": {
           "name": "Yharnam Sunrise",
@@ -116,6 +118,7 @@
       "id": 2,
       "grade": "gold",
       "group": "base",
+      "icon_url": "https://image.api.playstation.com/trophy/np/NPWR05818_00_00347A646D41E9660F4153AD7A0274E2BC597C5A27/6D41C821BD25E5AD59A130F0D8D0217094557FC6.PNG",
       "translations": {
         "en": {
           "name": "Honoring Wishes",
@@ -171,6 +174,7 @@
       "id": 3,
       "grade": "gold",
       "group": "base",
+      "icon_url": "https://image.api.playstation.com/trophy/np/NPWR05818_00_00347A646D41E9660F4153AD7A0274E2BC597C5A27/B5D967D89CEE3369C5DA1FC9F99B2BBCAFC6612E.PNG",
       "translations": {
         "en": {
           "name": "Childhood's Beginning",
@@ -226,6 +230,7 @@
       "id": 4,
       "grade": "gold",
       "group": "base",
+      "icon_url": "https://image.api.playstation.com/trophy/np/NPWR05818_00_00347A646D41E9660F4153AD7A0274E2BC597C5A27/FF0CE1611E5E751BA1B9E89B3B85F38BA120EECE.PNG",
       "translations": {
         "en": {
           "name": "Yharnam, Pthumerian Queen",
@@ -281,6 +286,7 @@
       "id": 5,
       "grade": "gold",
       "group": "base",
+      "icon_url": "https://image.api.playstation.com/trophy/np/NPWR05818_00_00347A646D41E9660F4153AD7A0274E2BC597C5A27/CC5C66E4C1F89BC3DB8C4E5C3A8567472F7D20EB.PNG",
       "translations": {
         "en": {
           "name": "Hunter's Essence",
@@ -336,6 +342,7 @@
       "id": 6,
       "grade": "gold",
       "group": "base",
+      "icon_url": "https://image.api.playstation.com/trophy/np/NPWR05818_00_00347A646D41E9660F4153AD7A0274E2BC597C5A27/F34AA9C1EFAA94609521282F706BC57F6B0F0E76.PNG",
       "translations": {
         "en": {
           "name": "Hunter's Craft",
@@ -391,6 +398,7 @@
       "id": 7,
       "grade": "silver",
       "group": "base",
+      "icon_url": "https://image.api.playstation.com/trophy/np/NPWR05818_00_00347A646D41E9660F4153AD7A0274E2BC597C5A27/93C655661F8C3D787DD2BFBA411F1E307D22E8F5.PNG",
       "translations": {
         "en": {
           "name": "Weapon Master",
@@ -446,6 +454,7 @@
       "id": 8,
       "grade": "silver",
       "group": "base",
+      "icon_url": "https://image.api.playstation.com/trophy/np/NPWR05818_00_00347A646D41E9660F4153AD7A0274E2BC597C5A27/CF65FBCC347B74E297D695C36D2F81909766EC38.PNG",
       "translations": {
         "en": {
           "name": "Blood Gem Master",
@@ -501,6 +510,7 @@
       "id": 9,
       "grade": "silver",
       "group": "base",
+      "icon_url": "https://image.api.playstation.com/trophy/np/NPWR05818_00_00347A646D41E9660F4153AD7A0274E2BC597C5A27/56728727C1C6DC6DB4DACA8DE7349CE4CE667D15.PNG",
       "translations": {
         "en": {
           "name": "Rune Master",
@@ -556,6 +566,7 @@
       "id": 10,
       "grade": "silver",
       "group": "base",
+      "icon_url": "https://image.api.playstation.com/trophy/np/NPWR05818_00_00347A646D41E9660F4153AD7A0274E2BC597C5A27/FDB2A3390151EBC448175FF43403BB17D961A9E4.PNG",
       "translations": {
         "en": {
           "name": "Cainhurst",
@@ -611,6 +622,7 @@
       "id": 11,
       "grade": "silver",
       "group": "base",
+      "icon_url": "https://image.api.playstation.com/trophy/np/NPWR05818_00_00347A646D41E9660F4153AD7A0274E2BC597C5A27/5A3BBEC577A810048383227ED34B83F0B64055DD.PNG",
       "translations": {
         "en": {
           "name": "The Choir",
@@ -666,6 +678,7 @@
       "id": 12,
       "grade": "silver",
       "group": "base",
+      "icon_url": "https://image.api.playstation.com/trophy/np/NPWR05818_00_00347A646D41E9660F4153AD7A0274E2BC597C5A27/46B3D125FE320C0E23B919EE15EF66994197F80E.PNG",
       "translations": {
         "en": {
           "name": "The Source of the Dream",
@@ -721,6 +734,7 @@
       "id": 13,
       "grade": "silver",
       "group": "base",
+      "icon_url": "https://image.api.playstation.com/trophy/np/NPWR05818_00_00347A646D41E9660F4153AD7A0274E2BC597C5A27/E55D566082BD14B50B1E18121C5A0599C3A612A1.PNG",
       "translations": {
         "en": {
           "name": "Nightmare Lecture Building",
@@ -776,6 +790,7 @@
       "id": 14,
       "grade": "bronze",
       "group": "base",
+      "icon_url": "https://image.api.playstation.com/trophy/np/NPWR05818_00_00347A646D41E9660F4153AD7A0274E2BC597C5A27/844044D8F98C4D2580650D005A8D5EFA10F40417.PNG",
       "translations": {
         "en": {
           "name": "Father Gascoigne",
@@ -831,6 +846,7 @@
       "id": 15,
       "grade": "bronze",
       "group": "base",
+      "icon_url": "https://image.api.playstation.com/trophy/np/NPWR05818_00_00347A646D41E9660F4153AD7A0274E2BC597C5A27/7A7C4F08E7D1E0E8D40BF120F519A70BF6658798.PNG",
       "translations": {
         "en": {
           "name": "Vicar Amelia",
@@ -886,6 +902,7 @@
       "id": 16,
       "grade": "bronze",
       "group": "base",
+      "icon_url": "https://image.api.playstation.com/trophy/np/NPWR05818_00_00347A646D41E9660F4153AD7A0274E2BC597C5A27/DB4781DD9DB128552872708F7B070FD2AB0C80C0.PNG",
       "translations": {
         "en": {
           "name": "Shadow of Yharnam",
@@ -941,6 +958,7 @@
       "id": 17,
       "grade": "bronze",
       "group": "base",
+      "icon_url": "https://image.api.playstation.com/trophy/np/NPWR05818_00_00347A646D41E9660F4153AD7A0274E2BC597C5A27/FECCD3C7F98D77CB33D4332457B3A5E5C9611466.PNG",
       "translations": {
         "en": {
           "name": "Rom, the Vacuous Spider",
@@ -996,6 +1014,7 @@
       "id": 18,
       "grade": "bronze",
       "group": "base",
+      "icon_url": "https://image.api.playstation.com/trophy/np/NPWR05818_00_00347A646D41E9660F4153AD7A0274E2BC597C5A27/2C76EBE9D00246720835C21E87BD88454689F484.PNG",
       "translations": {
         "en": {
           "name": "The One Reborn",
@@ -1051,6 +1070,7 @@
       "id": 19,
       "grade": "bronze",
       "group": "base",
+      "icon_url": "https://image.api.playstation.com/trophy/np/NPWR05818_00_00347A646D41E9660F4153AD7A0274E2BC597C5A27/FA4956210F3873952C502B3C06EF9341667483FB.PNG",
       "translations": {
         "en": {
           "name": "Micolash, Host of the Nightmare",
@@ -1106,6 +1126,7 @@
       "id": 20,
       "grade": "bronze",
       "group": "base",
+      "icon_url": "https://image.api.playstation.com/trophy/np/NPWR05818_00_00347A646D41E9660F4153AD7A0274E2BC597C5A27/1C0CE60FF0EBD1A3EE45A2A94BE31C2024CFB384.PNG",
       "translations": {
         "en": {
           "name": "Mergo's Wet Nurse",
@@ -1161,6 +1182,7 @@
       "id": 21,
       "grade": "bronze",
       "group": "base",
+      "icon_url": "https://image.api.playstation.com/trophy/np/NPWR05818_00_00347A646D41E9660F4153AD7A0274E2BC597C5A27/1B133989650F40B1ED6EA34DD7D7A00B29629010.PNG",
       "translations": {
         "en": {
           "name": "Cleric Beast",
@@ -1216,6 +1238,7 @@
       "id": 22,
       "grade": "bronze",
       "group": "base",
+      "icon_url": "https://image.api.playstation.com/trophy/np/NPWR05818_00_00347A646D41E9660F4153AD7A0274E2BC597C5A27/2184C196EE05EFB7AB69B61F5B9590A97129DF91.PNG",
       "translations": {
         "en": {
           "name": "Blood-starved Beast",
@@ -1271,6 +1294,7 @@
       "id": 23,
       "grade": "bronze",
       "group": "base",
+      "icon_url": "https://image.api.playstation.com/trophy/np/NPWR05818_00_00347A646D41E9660F4153AD7A0274E2BC597C5A27/7E61727498A2E1EB3FF3F5EDEBBC1010E7A696C6.PNG",
       "translations": {
         "en": {
           "name": "The Witch of Hemwick",
@@ -1326,6 +1350,7 @@
       "id": 24,
       "grade": "bronze",
       "group": "base",
+      "icon_url": "https://image.api.playstation.com/trophy/np/NPWR05818_00_00347A646D41E9660F4153AD7A0274E2BC597C5A27/364FE445252C70557BDCC98B8698C12AB8C535E8.PNG",
       "translations": {
         "en": {
           "name": "Darkbeast Paarl",
@@ -1381,6 +1406,7 @@
       "id": 25,
       "grade": "bronze",
       "group": "base",
+      "icon_url": "https://image.api.playstation.com/trophy/np/NPWR05818_00_00347A646D41E9660F4153AD7A0274E2BC597C5A27/6FABD02BD8F836FA33CBE7D56EA1B891D1203729.PNG",
       "translations": {
         "en": {
           "name": "Amygdala",
@@ -1436,6 +1462,7 @@
       "id": 26,
       "grade": "bronze",
       "group": "base",
+      "icon_url": "https://image.api.playstation.com/trophy/np/NPWR05818_00_00347A646D41E9660F4153AD7A0274E2BC597C5A27/3740F737944C62B21F7BFD1C50133B060F646413.PNG",
       "translations": {
         "en": {
           "name": "Martyr Logarius",
@@ -1491,6 +1518,7 @@
       "id": 27,
       "grade": "bronze",
       "group": "base",
+      "icon_url": "https://image.api.playstation.com/trophy/np/NPWR05818_00_00347A646D41E9660F4153AD7A0274E2BC597C5A27/311301AD9F4DA6EC49DE65D62CDAF9FB8F0FA8FD.PNG",
       "translations": {
         "en": {
           "name": "Celestial Emissary",
@@ -1546,6 +1574,7 @@
       "id": 28,
       "grade": "bronze",
       "group": "base",
+      "icon_url": "https://image.api.playstation.com/trophy/np/NPWR05818_00_00347A646D41E9660F4153AD7A0274E2BC597C5A27/426A7E6023D0573AB99D7694657EB1EA7F20B368.PNG",
       "translations": {
         "en": {
           "name": "Ebrietas, Daughter of the Cosmos",
@@ -1601,6 +1630,7 @@
       "id": 29,
       "grade": "bronze",
       "group": "base",
+      "icon_url": "https://image.api.playstation.com/trophy/np/NPWR05818_00_00347A646D41E9660F4153AD7A0274E2BC597C5A27/F8A95977917F971671FC4836017BBA12B6D5F3D8.PNG",
       "translations": {
         "en": {
           "name": "Blood Gem Contact",
@@ -1656,6 +1686,7 @@
       "id": 30,
       "grade": "bronze",
       "group": "base",
+      "icon_url": "https://image.api.playstation.com/trophy/np/NPWR05818_00_00347A646D41E9660F4153AD7A0274E2BC597C5A27/029B1AF5FFC310E2AE0EEF87CE8FD30E7BF0AD7F.PNG",
       "translations": {
         "en": {
           "name": "Rune Contact",
@@ -1711,6 +1742,7 @@
       "id": 31,
       "grade": "bronze",
       "group": "base",
+      "icon_url": "https://image.api.playstation.com/trophy/np/NPWR05818_00_00347A646D41E9660F4153AD7A0274E2BC597C5A27/AAF01204F31FCBEBD6C0351944C373522A825205.PNG",
       "translations": {
         "en": {
           "name": "Chalice of Pthumeru",
@@ -1766,6 +1798,7 @@
       "id": 32,
       "grade": "bronze",
       "group": "base",
+      "icon_url": "https://image.api.playstation.com/trophy/np/NPWR05818_00_00347A646D41E9660F4153AD7A0274E2BC597C5A27/233E8F1CADFCA21969B61D5E0B6773FB568DAF44.PNG",
       "translations": {
         "en": {
           "name": "Chalice of Ailing Loran",
@@ -1821,6 +1854,7 @@
       "id": 33,
       "grade": "bronze",
       "group": "base",
+      "icon_url": "https://image.api.playstation.com/trophy/np/NPWR05818_00_00347A646D41E9660F4153AD7A0274E2BC597C5A27/391D7273AA0D8B2679FB5B8339BBCDB170587E29.PNG",
       "translations": {
         "en": {
           "name": "Chalice of Isz",
@@ -1876,6 +1910,7 @@
       "id": 34,
       "grade": "gold",
       "group": "old_hunters",
+      "icon_url": "https://image.api.playstation.com/trophy/np/NPWR05818_00_00347A646D41E9660F4153AD7A0274E2BC597C5A27/0419FAD30357367E4A516403FCBDDE691F542DB6.PNG",
       "translations": {
         "en": {
           "name": "Old Hunter's Essence",
@@ -1931,6 +1966,7 @@
       "id": 35,
       "grade": "silver",
       "group": "old_hunters",
+      "icon_url": "https://image.api.playstation.com/trophy/np/NPWR05818_00_00347A646D41E9660F4153AD7A0274E2BC597C5A27/72489E8C5A9409ACE3BF71224A4710D53438A85F.PNG",
       "translations": {
         "en": {
           "name": "Orphan of Kos",
@@ -1986,6 +2022,7 @@
       "id": 36,
       "grade": "bronze",
       "group": "old_hunters",
+      "icon_url": "https://image.api.playstation.com/trophy/np/NPWR05818_00_00347A646D41E9660F4153AD7A0274E2BC597C5A27/47AC9BD0B2CF042D671438602BABA1422E865881.PNG",
       "translations": {
         "en": {
           "name": "Ludwig, the Holy Blade",
@@ -2041,6 +2078,7 @@
       "id": 37,
       "grade": "bronze",
       "group": "old_hunters",
+      "icon_url": "https://image.api.playstation.com/trophy/np/NPWR05818_00_00347A646D41E9660F4153AD7A0274E2BC597C5A27/3816C1D8F74D3F16D4F90E888C8EDB83CB66B8DF.PNG",
       "translations": {
         "en": {
           "name": "Lady Maria of the Astral Clocktower",
@@ -2096,6 +2134,7 @@
       "id": 38,
       "grade": "bronze",
       "group": "old_hunters",
+      "icon_url": "https://image.api.playstation.com/trophy/np/NPWR05818_00_00347A646D41E9660F4153AD7A0274E2BC597C5A27/E4172A6E241F3E7C6F0F1AE6B1461131411174F0.PNG",
       "translations": {
         "en": {
           "name": "Living Failures",
@@ -2151,6 +2190,7 @@
       "id": 39,
       "grade": "bronze",
       "group": "old_hunters",
+      "icon_url": "https://image.api.playstation.com/trophy/np/NPWR05818_00_00347A646D41E9660F4153AD7A0274E2BC597C5A27/74D8DE032F0C735CBBC8ED127A9C2EE197641F55.PNG",
       "translations": {
         "en": {
           "name": "Laurence, the First Vicar",

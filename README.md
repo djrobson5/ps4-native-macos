@@ -5,7 +5,8 @@
 > Bloodborne, as upstream does, and **13 Sentinels: Aegis Rim** (CUSA19610 1.00), which it adds.
 > It also carries the scripts a launcher uses to check a player's own game, unpack a fake PKG and
 > package an app (`scripts/game_check_13s.py`, `scripts/pkg_extract.py`,
-> `scripts/package-13s-app.sh`); the maintainer's own launcher, Wayfarer (not public), installs and
+> `scripts/package-app.sh --title 13s|bloodborne`, which makes `13 Sentinels.app` or
+> `Bloodborne.app`); the maintainer's own launcher, Wayfarer (not public), installs and
 > updates from this branch. Bring your own game: no game files or console keys are in this
 > repository. Everything below is upstream's README.
 
