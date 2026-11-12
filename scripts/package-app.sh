@@ -106,10 +106,16 @@ fi
 
 build=build/macos-arm64
 [[ -x out/bb-probe && -d $build ]] || { echo 'No build: run bash build.sh first.' >&2; exit 1; }
-if pgrep -f "$app_name.app/Contents/MacOS/" >/dev/null; then
-    echo "$app_name is running: quit it first." >&2
-    exit 1
-fi
+# A program of the app this replaces (the game, a shader compile run, a tool of the bundle), by the
+# executable each process runs (scripts/app_running.py): pgrep -f also matched any command line
+# that merely named the path, and refused a rebuild while nothing of the app was running.
+running=0
+python3 -I scripts/app_running.py "$dest/$app_name.app" >/dev/null || running=$?
+case $running in
+0) echo "$app_name is running: quit it first." >&2; exit 1 ;;
+1) ;;
+*) echo "Couldn't check whether $app_name is running." >&2; exit 1 ;;
+esac
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/$title-app.XXXXXX")
 trap 'rm -rf "${work:?}"' EXIT

@@ -327,6 +327,11 @@ if (BUILD_TESTING)
                  ${CMAKE_SOURCE_DIR}/tests/test_game_check_13s.py)
         add_test(NAME game-check-bb COMMAND Python3::Interpreter -I
                  ${CMAKE_SOURCE_DIR}/tests/test_game_check_bb.py)
+        # package-app.sh's check that no program of the app it replaces is running.
+        if (APPLE)
+            add_test(NAME app-running COMMAND Python3::Interpreter -I
+                     ${CMAKE_SOURCE_DIR}/tests/test_app_running.py)
+        endif()
     endif()
 
     # The app's launch (src/app_bundle.c). The dump the probe writes for run.sh's last line needs
